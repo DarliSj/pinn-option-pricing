@@ -16,7 +16,7 @@
 
 #SBATCH --job-name=pinn_stage2
 #SBATCH --partition=gpu-common
-#SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:2080:1
 #SBATCH --mem=32G
 #SBATCH --cpus-per-task=4
 #SBATCH --time=4:00:00

@@ -10,7 +10,7 @@
 
 #SBATCH --job-name=pinn_smoke
 #SBATCH --partition=gpu-common
-#SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:2080:1
 #SBATCH --mem=16G
 #SBATCH --cpus-per-task=4
 #SBATCH --time=0:30:00
