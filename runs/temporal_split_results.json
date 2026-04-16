@@ -1,0 +1,84 @@
+{
+  "_meta": {
+    "description": "Stage 0 temporal-split results extracted from notebook-era checkpoints in /checkpoints/.",
+    "train_cutoff": "Nov2020",
+    "test_window": "Dec2020",
+    "n_train": 47810,
+    "sigma_fixed": 0.7719,
+    "note": "final_rmse_mkt is best-epoch RMSE — notebook saved checkpoint at validation minimum, not final epoch.",
+    "units": "dollars vs market mid-price",
+    "architecture_key": {
+      "standard": "StandardPricingNet — plain MLP + Fourier features, no RWF, no Modified MLP (B0/B1 baseline)",
+      "modified": "PricingNet — Modified MLP + RWF + Fourier features (Wang et al. 2023)"
+    }
+  },
+  "results": [
+    {
+      "checkpoint": "stage0_model_physics.pt",
+      "arch": "standard",
+      "mode": "physics",
+      "rwf_mu": null,
+      "rmse_mkt": 12.452831268310547
+    },
+    {
+      "checkpoint": "stage0_model_hybrid.pt",
+      "arch": "standard",
+      "mode": "hybrid",
+      "rwf_mu": null,
+      "rmse_mkt": 10.080763816833496
+    },
+    {
+      "checkpoint": "stage0_model_RWF_NLP_mu=0.5physics.pt",
+      "arch": "modified",
+      "mode": "physics",
+      "rwf_mu": 0.5,
+      "rmse_mkt": 12.023185729980469
+    },
+    {
+      "checkpoint": "stage0_model_RWF_NLP_mu=0.75physics.pt",
+      "arch": "modified",
+      "mode": "physics",
+      "rwf_mu": 0.75,
+      "rmse_mkt": 11.707071304321289
+    },
+    {
+      "checkpoint": "stage0_model_RWF_NLP_mu=1physics.pt",
+      "arch": "modified",
+      "mode": "physics",
+      "rwf_mu": 1.0,
+      "rmse_mkt": 9.257868766784668
+    },
+    {
+      "checkpoint": "stage0_model_RWF_NLP_mu=0.5hybrid.pt",
+      "arch": "modified",
+      "mode": "hybrid",
+      "rwf_mu": 0.5,
+      "rmse_mkt": 8.754369735717773
+    },
+    {
+      "checkpoint": "stage0_model_RWF_NLP_mu=0.75hybrid.pt",
+      "arch": "modified",
+      "mode": "hybrid",
+      "rwf_mu": 0.75,
+      "rmse_mkt": 9.05583667755127
+    },
+    {
+      "checkpoint": "stage0_model_RWF_NLP_hybrid.pt",
+      "arch": "modified",
+      "mode": "hybrid",
+      "rwf_mu": 1.0,
+      "rmse_mkt": 9.571859359741211,
+      "_note": "mu=1.0 inferred — filename lacks explicit mu, matches mu=1 physics run date (Mar 19)"
+    }
+  ],
+  "summary_table": {
+    "standard_physics":       { "rmse_mkt": 12.45 },
+    "standard_hybrid":        { "rmse_mkt": 10.08 },
+    "modified_physics_mu0.5": { "rmse_mkt": 12.02 },
+    "modified_physics_mu0.75":{ "rmse_mkt": 11.71 },
+    "modified_physics_mu1.0": { "rmse_mkt": 9.26  },
+    "modified_hybrid_mu0.5":  { "rmse_mkt": 8.75  },
+    "modified_hybrid_mu0.75": { "rmse_mkt": 9.06  },
+    "modified_hybrid_mu1.0":  { "rmse_mkt": 9.57  }
+  }
+}

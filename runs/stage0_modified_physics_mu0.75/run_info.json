@@ -1,0 +1,45 @@
+{
+  "mode": "physics",
+  "arch": "modified",
+  "epochs": 100,
+  "lr": 0.001,
+  "rwf_mu": 0.75,
+  "rwf_sigma": 0.1,
+  "hidden_dims": [
+    64,
+    64,
+    64,
+    64
+  ],
+  "elapsed_seconds": 22.761231184005737,
+  "vol_type": null,
+  "pricing_lr": null,
+  "vol_lr": null,
+  "checkpoint_source": null,
+  "final_rmse_bs_norm": 1.2355817556381226,
+  "final_rmse_mkt": 765.557396392674,
+  "final_mae_mkt": 555.6803002192613,
+  "final_sum_sq_err_mkt": 6949714432.0,
+  "final_sum_abs_err_mkt": 6589257.0,
+  "n_test": 11858,
+  "selection_key": "rmse_bs_norm",
+  "best_epoch": 100,
+  "best_rmse_bs_norm": 1.2355817556381226,
+  "best_rmse_mkt": 765.557396392674,
+  "drift_gap": 0.0,
+  "adaptive_weights": {
+    "pde": 1.0000003916547193,
+    "tc": 35735.129032131284,
+    "bc": 89438.77550334223
+  },
+  "config": {
+    "sigma_fixed": 0.771868,
+    "r_fixed": 0.0012,
+    "m_min": 0.65,
+    "m_max": 1.3497625375,
+    "tau_min": 0.010958904109589,
+    "tau_max": 2.4383561643835616,
+    "n_train": 47810,
+    "n_atm": 13460
+  }
+}

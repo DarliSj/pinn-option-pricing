@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.ipynb_checkpoints/
+
+# Conda env — never commit this, recreate from environment_server.yml
+pinn_env/
+
+# Large training artifacts — transfer via rsync, not git
+runs/walk_forward/*/fold_*.pt
+runs/stage2/
+runs/smoke/
+runs/stage2_smoke/
+
+# Keep: results.json, run_info.json, history.json, *.png in runs/
+# Keep: runs/temporal_split_results.json
+
+# Checkpoint .pt files — transfer via rsync
+checkpoints/*.pt
+
+# macOS
+.DS_Store
+*.swp

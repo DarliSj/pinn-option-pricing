@@ -1,0 +1,29 @@
+# Server environment for Duke HPC (Linux + CUDA).
+# Do NOT use environment.yml — that file is macOS-only (has pyobjc, appnope, etc.)
+#
+# Usage (on server):
+#   conda env create -f environment_server.yml
+#   conda activate pinn_env
+#
+# PyTorch is installed via pip with the CUDA wheel (see pip section below).
+# Adjust the --index-url CUDA version to match your server's CUDA driver:
+#   CUDA 11.8 → https://download.pytorch.org/whl/cu118
+#   CUDA 12.1 → https://download.pytorch.org/whl/cu121
+#   CUDA 12.4 → https://download.pytorch.org/whl/cu124
+
+name: pinn_env
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - numpy=1.26
+  - scipy=1.13
+  - matplotlib=3.9
+  - pandas=2.2
+  - jupyterlab=4.2
+  - ipykernel
+  - pip
+  - pip:
+    # Replace cu121 with your server's CUDA version
+    - torch==2.2.2+cu121 --index-url https://download.pytorch.org/whl/cu121
+    - torchvision==0.17.2+cu121 --index-url https://download.pytorch.org/whl/cu121
