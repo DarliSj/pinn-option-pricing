@@ -7,17 +7,12 @@ __pycache__/
 # Conda env — never commit this, recreate from environment_server.yml
 pinn_env/
 
-# Large training artifacts — transfer via rsync, not git
-runs/walk_forward/*/fold_*.pt
+# Transient run directories (smoke tests, intermediate stage2)
 runs/stage2/
 runs/smoke/
 runs/stage2_smoke/
 
-# Keep: results.json, run_info.json, history.json, *.png in runs/
-# Keep: runs/temporal_split_results.json
-
-# Checkpoint .pt files — transfer via rsync
-checkpoints/*.pt
+# Keep everything in runs/walk_forward/ and checkpoints/ (all small)
 
 # macOS
 .DS_Store
