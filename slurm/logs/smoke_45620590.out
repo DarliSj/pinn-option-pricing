@@ -1,0 +1,44 @@
+Node:  dcc-core-gpu-ferc-s-h36-5
+GPU:   NVIDIA GeForce RTX 2080 Ti
+Date:  Thu Apr 16 01:39:34 AM EDT 2026
+CUDA: True
+Device: NVIDIA GeForce RTX 2080 Ti
+Device: cuda
+Loading and preprocessing data...
+Full dataset: 59,668 obs, 2020-01-02 → 2020-12-31
+
+============================================================
+FOLD 1/1: Nov2020
+  Train: start → 2020-11-01  |  Test: 2020-11-01 → 2020-12-01
+============================================================
+  Train: 47,810  Test: 6,420
+  σ_fixed: 0.7719
+Training: mode=hybrid, epochs=500, lr=0.001
+  Architecture: Modified MLP + RWF (μ=0.75)
+  Pricing net params: 37,698
+  Loss terms: ['pde', 'tc', 'bc', 'data']
+======================================================================
+Ep     1/500 | L=6.29e+06 | pde=4.33e+06 | w=1.00 | tc=9.11e+00 | w=35734.66 | bc=1.06e+01 | w=89437.57 | data=7.21e+00 | w=95386.75 | lr=1.0e-03
+  [VAL] RMSE vs BS (norm): 0.030395 | RMSE vs Market ($): 16.69 | MAE vs Market ($): 9.95
+  ** New best rmse_mkt: 16.688121 (diagnostic only)
+
+Training complete in 11.5s
+Reporting final-epoch state (best rmse_mkt=16.688121 @ ep 500 kept as stability diagnostic only)
+  → RMSE vs Market: $16.69
+
+
+======================================================================================
+WALK-FORWARD RESULTS: arch=modified, mode=hybrid, μ=0.75
+  Reporting final-epoch RMSE; best/drift columns are stability diagnostics only
+======================================================================================
+Fold       |  σ_fix |  final($) |  best($) | best@ep |   drift | time(s)
+--------------------------------------------------------------------------------------
+Nov2020    |  0.772 |     16.69 |    16.69 |     500 |   +0.00 |      12
+--------------------------------------------------------------------------------------
+Pooled     |        |     16.69 |          |         |         |      12   ← headline
+Mean(fold) |        |     16.69 |          |         |   +0.00 |
+Std(fold)  |        |      0.00 |          |         |    0.00 |
+Worst      |        |     16.69 |          |         |         |    (Nov2020)
+
+Results saved to runs/smoke/modified_hybrid_mu0.75/
+Smoke test done: Thu Apr 16 01:39:58 AM EDT 2026

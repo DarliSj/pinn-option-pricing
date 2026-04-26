@@ -1,0 +1,444 @@
+============================================
+Job ID:     45621448
+Array task: 4
+Node:       dcc-core-gpu-ferc-s-h36-5
+GPU:        NVIDIA GeForce RTX 2080 Ti
+Date:       Thu Apr 16 02:24:46 AM EDT 2026
+============================================
+Config: arch=modified  mode=hybrid  mu=0.75
+============================================
+Device: cuda
+Loading and preprocessing data...
+Full dataset: 59,668 obs, 2020-01-02 → 2020-12-31
+
+============================================================
+FOLD 1/9: Apr2020
+  Train: start → 2020-04-01  |  Test: 2020-04-01 → 2020-05-01
+============================================================
+  Train: 15,684  Test: 3,094
+  σ_fixed: 0.7294
+Training: mode=hybrid, epochs=15000, lr=0.001
+  Architecture: Modified MLP + RWF (μ=0.75)
+  Pricing net params: 37,698
+  Loss terms: ['pde', 'tc', 'bc', 'data']
+======================================================================
+Ep     1/15000 | L=4.97e+06 | pde=3.41e+06 | w=1.00 | tc=9.08e+00 | w=27847.64 | bc=1.06e+01 | w=69280.34 | data=7.45e+00 | w=77215.68 | lr=1.0e-03
+  [VAL] RMSE vs BS (norm): 0.043902 | RMSE vs Market ($): 8.36 | MAE vs Market ($): 7.13
+  ** New best rmse_mkt: 8.358173 (diagnostic only)
+Ep  2000/15000 | L=4.66e+01 | pde=5.39e+00 | w=1.00 | tc=2.33e-04 | w=23623.69 | bc=1.45e-05 | w=63657.59 | data=5.48e-04 | w=63464.81 | lr=9.6e-04
+  [VAL] RMSE vs BS (norm): 0.028101 | RMSE vs Market ($): 6.15 | MAE vs Market ($): 5.53
+  ** New best rmse_mkt: 6.148252 (diagnostic only)
+  [VAL] RMSE vs BS (norm): 0.020552 | RMSE vs Market ($): 4.45 | MAE vs Market ($): 3.57
+  ** New best rmse_mkt: 4.451520 (diagnostic only)
+Ep  4000/15000 | L=2.20e+01 | pde=1.71e+00 | w=1.00 | tc=2.87e-05 | w=19842.17 | bc=8.76e-05 | w=52548.75 | data=2.91e-04 | w=52080.91 | lr=8.4e-04
+  [VAL] RMSE vs BS (norm): 0.016892 | RMSE vs Market ($): 3.80 | MAE vs Market ($): 3.13
+  ** New best rmse_mkt: 3.803052 (diagnostic only)
+  [VAL] RMSE vs BS (norm): 0.016577 | RMSE vs Market ($): 3.51 | MAE vs Market ($): 2.70
+  ** New best rmse_mkt: 3.505682 (diagnostic only)
+Ep  6000/15000 | L=1.29e+01 | pde=1.08e+00 | w=1.00 | tc=1.54e-05 | w=16651.38 | bc=4.21e-06 | w=44457.39 | data=2.65e-04 | w=42957.16 | lr=6.6e-04
+  [VAL] RMSE vs BS (norm): 0.017728 | RMSE vs Market ($): 2.80 | MAE vs Market ($): 1.93
+  ** New best rmse_mkt: 2.804366 (diagnostic only)
+  [VAL] RMSE vs BS (norm): 0.017524 | RMSE vs Market ($): 3.45 | MAE vs Market ($): 2.54
+Ep  8000/15000 | L=1.09e+01 | pde=9.08e-01 | w=1.00 | tc=7.41e-06 | w=14811.97 | bc=1.37e-05 | w=36743.94 | data=2.60e-04 | w=36205.02 | lr=4.5e-04
+  [VAL] RMSE vs BS (norm): 0.015721 | RMSE vs Market ($): 3.09 | MAE vs Market ($): 2.29
+  [VAL] RMSE vs BS (norm): 0.016036 | RMSE vs Market ($): 3.29 | MAE vs Market ($): 2.44
+Ep 10000/15000 | L=8.83e+00 | pde=8.01e-01 | w=1.00 | tc=3.09e-06 | w=13778.96 | bc=5.05e-06 | w=31682.41 | data=2.52e-04 | w=31074.13 | lr=2.6e-04
+  [VAL] RMSE vs BS (norm): 0.016722 | RMSE vs Market ($): 2.96 | MAE vs Market ($): 2.11
+  [VAL] RMSE vs BS (norm): 0.015864 | RMSE vs Market ($): 3.03 | MAE vs Market ($): 2.23
+Ep 12000/15000 | L=7.79e+00 | pde=7.38e-01 | w=1.00 | tc=5.68e-07 | w=13209.75 | bc=1.67e-06 | w=28015.53 | data=2.53e-04 | w=27688.03 | lr=1.0e-04
+  [VAL] RMSE vs BS (norm): 0.016232 | RMSE vs Market ($): 3.07 | MAE vs Market ($): 2.24
+  [VAL] RMSE vs BS (norm): 0.016176 | RMSE vs Market ($): 3.06 | MAE vs Market ($): 2.23
+Ep 14000/15000 | L=6.72e+00 | pde=6.16e-01 | w=1.00 | tc=8.11e-08 | w=20202.68 | bc=1.35e-06 | w=25761.24 | data=2.47e-04 | w=24571.62 | lr=2.1e-05
+  [VAL] RMSE vs BS (norm): 0.016067 | RMSE vs Market ($): 3.03 | MAE vs Market ($): 2.21
+  [VAL] RMSE vs BS (norm): 0.016162 | RMSE vs Market ($): 3.04 | MAE vs Market ($): 2.22
+
+Training complete in 333.7s
+Reporting final-epoch state (best rmse_mkt=2.804366 @ ep 6000 kept as stability diagnostic only)
+  → RMSE vs Market: $3.04
+
+============================================================
+FOLD 2/9: May2020
+  Train: start → 2020-05-01  |  Test: 2020-05-01 → 2020-06-01
+============================================================
+  Train: 18,778  Test: 3,188
+  σ_fixed: 0.7756
+Training: mode=hybrid, epochs=15000, lr=0.001
+  Architecture: Modified MLP + RWF (μ=0.75)
+  Pricing net params: 37,698
+  Loss terms: ['pde', 'tc', 'bc', 'data']
+======================================================================
+Ep     1/15000 | L=6.35e+06 | pde=4.36e+06 | w=1.00 | tc=9.08e+00 | w=35610.54 | bc=1.06e+01 | w=88695.95 | data=7.57e+00 | w=95338.18 | lr=1.0e-03
+  [VAL] RMSE vs BS (norm): 0.042416 | RMSE vs Market ($): 5.78 | MAE vs Market ($): 5.37
+  ** New best rmse_mkt: 5.784500 (diagnostic only)
+Ep  2000/15000 | L=9.34e+01 | pde=8.83e+00 | w=1.00 | tc=4.64e-04 | w=29829.13 | bc=2.36e-04 | w=74196.19 | data=6.80e-04 | w=78256.64 | lr=9.6e-04
+  [VAL] RMSE vs BS (norm): 0.024071 | RMSE vs Market ($): 2.80 | MAE vs Market ($): 2.32
+  ** New best rmse_mkt: 2.795697 (diagnostic only)
+  [VAL] RMSE vs BS (norm): 0.018737 | RMSE vs Market ($): 2.40 | MAE vs Market ($): 1.75
+  ** New best rmse_mkt: 2.399139 (diagnostic only)
+Ep  4000/15000 | L=2.64e+01 | pde=2.31e+00 | w=1.00 | tc=6.80e-05 | w=25066.40 | bc=2.47e-05 | w=62630.83 | data=3.24e-04 | w=64310.52 | lr=8.4e-04
+  [VAL] RMSE vs BS (norm): 0.019573 | RMSE vs Market ($): 3.22 | MAE vs Market ($): 2.88
+  [VAL] RMSE vs BS (norm): 0.019272 | RMSE vs Market ($): 2.96 | MAE vs Market ($): 2.57
+Ep  6000/15000 | L=2.08e+01 | pde=1.97e+00 | w=1.00 | tc=2.79e-05 | w=21304.82 | bc=4.08e-05 | w=52258.03 | data=3.05e-04 | w=52908.95 | lr=6.6e-04
+  [VAL] RMSE vs BS (norm): 0.018903 | RMSE vs Market ($): 2.02 | MAE vs Market ($): 1.29
+  ** New best rmse_mkt: 2.023734 (diagnostic only)
+  [VAL] RMSE vs BS (norm): 0.017869 | RMSE vs Market ($): 2.39 | MAE vs Market ($): 1.86
+Ep  8000/15000 | L=1.39e+01 | pde=1.27e+00 | w=1.00 | tc=7.02e-06 | w=19956.14 | bc=8.22e-06 | w=44067.00 | data=2.72e-04 | w=44567.64 | lr=4.5e-04
+  [VAL] RMSE vs BS (norm): 0.017386 | RMSE vs Market ($): 2.05 | MAE vs Market ($): 1.52
+  [VAL] RMSE vs BS (norm): 0.018544 | RMSE vs Market ($): 2.66 | MAE vs Market ($): 2.19
+Ep 10000/15000 | L=1.16e+01 | pde=1.05e+00 | w=1.00 | tc=2.56e-06 | w=17939.02 | bc=3.47e-06 | w=38238.58 | data=2.68e-04 | w=38609.37 | lr=2.6e-04
+  [VAL] RMSE vs BS (norm): 0.017539 | RMSE vs Market ($): 2.33 | MAE vs Market ($): 1.80
+  [VAL] RMSE vs BS (norm): 0.018056 | RMSE vs Market ($): 2.51 | MAE vs Market ($): 2.02
+Ep 12000/15000 | L=1.03e+01 | pde=1.00e+00 | w=1.00 | tc=6.15e-07 | w=18032.96 | bc=2.46e-06 | w=33917.14 | data=2.67e-04 | w=34276.40 | lr=1.0e-04
+  [VAL] RMSE vs BS (norm): 0.017583 | RMSE vs Market ($): 2.30 | MAE vs Market ($): 1.80
+  [VAL] RMSE vs BS (norm): 0.017764 | RMSE vs Market ($): 2.33 | MAE vs Market ($): 1.82
+Ep 14000/15000 | L=8.91e+00 | pde=7.94e-01 | w=1.00 | tc=2.88e-07 | w=17966.92 | bc=1.47e-06 | w=30529.31 | data=2.66e-04 | w=30278.78 | lr=2.1e-05
+  [VAL] RMSE vs BS (norm): 0.017521 | RMSE vs Market ($): 2.33 | MAE vs Market ($): 1.83
+  [VAL] RMSE vs BS (norm): 0.017579 | RMSE vs Market ($): 2.32 | MAE vs Market ($): 1.81
+
+Training complete in 328.9s
+Reporting final-epoch state (best rmse_mkt=2.023734 @ ep 6000 kept as stability diagnostic only)
+  → RMSE vs Market: $2.32
+
+============================================================
+FOLD 3/9: Jun2020
+  Train: start → 2020-06-01  |  Test: 2020-06-01 → 2020-07-01
+============================================================
+  Train: 21,966  Test: 3,265
+  σ_fixed: 0.7376
+Training: mode=hybrid, epochs=15000, lr=0.001
+  Architecture: Modified MLP + RWF (μ=0.75)
+  Pricing net params: 37,698
+  Loss terms: ['pde', 'tc', 'bc', 'data']
+======================================================================
+Ep     1/15000 | L=5.15e+06 | pde=3.57e+06 | w=1.00 | tc=9.08e+00 | w=29120.32 | bc=1.06e+01 | w=72461.48 | data=7.29e+00 | w=75276.86 | lr=1.0e-03
+  [VAL] RMSE vs BS (norm): 0.046967 | RMSE vs Market ($): 9.83 | MAE vs Market ($): 8.63
+  ** New best rmse_mkt: 9.834589 (diagnostic only)
+Ep  2000/15000 | L=6.71e+01 | pde=6.09e+00 | w=1.00 | tc=4.15e-04 | w=24209.27 | bc=2.99e-05 | w=63105.76 | data=7.98e-04 | w=61537.30 | lr=9.6e-04
+  [VAL] RMSE vs BS (norm): 0.030559 | RMSE vs Market ($): 6.44 | MAE vs Market ($): 5.92
+  ** New best rmse_mkt: 6.443792 (diagnostic only)
+  [VAL] RMSE vs BS (norm): 0.023370 | RMSE vs Market ($): 4.67 | MAE vs Market ($): 4.12
+  ** New best rmse_mkt: 4.671793 (diagnostic only)
+Ep  4000/15000 | L=2.16e+01 | pde=1.74e+00 | w=1.00 | tc=7.15e-05 | w=20210.83 | bc=6.36e-06 | w=54007.46 | data=3.60e-04 | w=50317.01 | lr=8.4e-04
+  [VAL] RMSE vs BS (norm): 0.022001 | RMSE vs Market ($): 4.09 | MAE vs Market ($): 3.50
+  ** New best rmse_mkt: 4.094892 (diagnostic only)
+  [VAL] RMSE vs BS (norm): 0.018619 | RMSE vs Market ($): 3.04 | MAE vs Market ($): 2.42
+  ** New best rmse_mkt: 3.039636 (diagnostic only)
+Ep  6000/15000 | L=1.39e+01 | pde=9.50e-01 | w=1.00 | tc=2.27e-05 | w=17498.57 | bc=3.11e-06 | w=45495.69 | data=2.83e-04 | w=43738.05 | lr=6.6e-04
+  [VAL] RMSE vs BS (norm): 0.020064 | RMSE vs Market ($): 3.55 | MAE vs Market ($): 2.93
+  [VAL] RMSE vs BS (norm): 0.019073 | RMSE vs Market ($): 2.83 | MAE vs Market ($): 2.01
+  ** New best rmse_mkt: 2.828721 (diagnostic only)
+Ep  8000/15000 | L=1.10e+01 | pde=7.54e-01 | w=1.00 | tc=8.31e-06 | w=16808.66 | bc=8.76e-06 | w=38785.33 | data=2.61e-04 | w=37212.91 | lr=4.5e-04
+  [VAL] RMSE vs BS (norm): 0.018720 | RMSE vs Market ($): 3.12 | MAE vs Market ($): 2.47
+  [VAL] RMSE vs BS (norm): 0.018634 | RMSE vs Market ($): 3.00 | MAE vs Market ($): 2.31
+Ep 10000/15000 | L=8.60e+00 | pde=6.74e-01 | w=1.00 | tc=2.24e-06 | w=14577.79 | bc=7.37e-06 | w=32945.94 | data=2.44e-04 | w=31401.08 | lr=2.6e-04
+  [VAL] RMSE vs BS (norm): 0.017998 | RMSE vs Market ($): 2.75 | MAE vs Market ($): 2.08
+  ** New best rmse_mkt: 2.750532 (diagnostic only)
+  [VAL] RMSE vs BS (norm): 0.018026 | RMSE vs Market ($): 2.89 | MAE vs Market ($): 2.21
+Ep 12000/15000 | L=7.46e+00 | pde=6.17e-01 | w=1.00 | tc=7.96e-07 | w=14127.86 | bc=1.50e-06 | w=30153.34 | data=2.47e-04 | w=27436.59 | lr=1.0e-04
+  [VAL] RMSE vs BS (norm): 0.017763 | RMSE vs Market ($): 2.75 | MAE vs Market ($): 2.05
+  ** New best rmse_mkt: 2.750459 (diagnostic only)
+  [VAL] RMSE vs BS (norm): 0.017690 | RMSE vs Market ($): 2.72 | MAE vs Market ($): 2.00
+  ** New best rmse_mkt: 2.717120 (diagnostic only)
+Ep 14000/15000 | L=6.51e+00 | pde=4.97e-01 | w=1.00 | tc=1.75e-07 | w=16749.54 | bc=7.58e-07 | w=27752.64 | data=2.45e-04 | w=24424.98 | lr=2.1e-05
+  [VAL] RMSE vs BS (norm): 0.017935 | RMSE vs Market ($): 2.72 | MAE vs Market ($): 2.01
+  [VAL] RMSE vs BS (norm): 0.017673 | RMSE vs Market ($): 2.67 | MAE vs Market ($): 1.99
+  ** New best rmse_mkt: 2.674228 (diagnostic only)
+
+Training complete in 329.9s
+Reporting final-epoch state (best rmse_mkt=2.674228 @ ep 15000 kept as stability diagnostic only)
+  → RMSE vs Market: $2.67
+
+============================================================
+FOLD 4/9: Jul2020
+  Train: start → 2020-07-01  |  Test: 2020-07-01 → 2020-08-01
+============================================================
+  Train: 25,231  Test: 5,083
+  σ_fixed: 0.7117
+Training: mode=hybrid, epochs=15000, lr=0.001
+  Architecture: Modified MLP + RWF (μ=0.75)
+  Pricing net params: 37,698
+  Loss terms: ['pde', 'tc', 'bc', 'data']
+======================================================================
+Ep     1/15000 | L=4.53e+06 | pde=3.13e+06 | w=1.00 | tc=9.11e+00 | w=25821.36 | bc=1.06e+01 | w=64537.03 | data=7.34e+00 | w=66311.12 | lr=1.0e-03
+  [VAL] RMSE vs BS (norm): 0.037120 | RMSE vs Market ($): 19.16 | MAE vs Market ($): 17.03
+  ** New best rmse_mkt: 19.159864 (diagnostic only)
+Ep  2000/15000 | L=7.29e+01 | pde=5.19e+00 | w=1.00 | tc=5.71e-04 | w=21537.07 | bc=2.66e-04 | w=53866.00 | data=7.56e-04 | w=54312.42 | lr=9.6e-04
+  [VAL] RMSE vs BS (norm): 0.024678 | RMSE vs Market ($): 11.91 | MAE vs Market ($): 9.47
+  ** New best rmse_mkt: 11.913996 (diagnostic only)
+  [VAL] RMSE vs BS (norm): 0.019093 | RMSE vs Market ($): 12.86 | MAE vs Market ($): 9.89
+Ep  4000/15000 | L=1.52e+01 | pde=2.25e+00 | w=1.00 | tc=3.34e-06 | w=20029.30 | bc=4.10e-05 | w=46015.00 | data=2.38e-04 | w=46259.85 | lr=8.4e-04
+  [VAL] RMSE vs BS (norm): 0.014601 | RMSE vs Market ($): 9.35 | MAE vs Market ($): 6.65
+  ** New best rmse_mkt: 9.347317 (diagnostic only)
+  [VAL] RMSE vs BS (norm): 0.015955 | RMSE vs Market ($): 11.26 | MAE vs Market ($): 7.96
+Ep  6000/15000 | L=1.22e+01 | pde=9.17e-01 | w=1.00 | tc=2.75e-05 | w=17060.86 | bc=3.53e-05 | w=38156.11 | data=2.44e-04 | w=38622.49 | lr=6.6e-04
+  [VAL] RMSE vs BS (norm): 0.015313 | RMSE vs Market ($): 11.49 | MAE vs Market ($): 8.34
+  [VAL] RMSE vs BS (norm): 0.015551 | RMSE vs Market ($): 10.75 | MAE vs Market ($): 7.32
+Ep  8000/15000 | L=9.03e+00 | pde=6.20e-01 | w=1.00 | tc=1.45e-05 | w=14731.05 | bc=4.76e-06 | w=32184.71 | data=2.50e-04 | w=32184.59 | lr=4.5e-04
+  [VAL] RMSE vs BS (norm): 0.014413 | RMSE vs Market ($): 10.41 | MAE vs Market ($): 7.17
+  [VAL] RMSE vs BS (norm): 0.013995 | RMSE vs Market ($): 10.18 | MAE vs Market ($): 6.93
+Ep 10000/15000 | L=7.20e+00 | pde=5.15e-01 | w=1.00 | tc=1.62e-06 | w=13076.35 | bc=2.64e-06 | w=28320.41 | data=2.44e-04 | w=26974.98 | lr=2.6e-04
+  [VAL] RMSE vs BS (norm): 0.014764 | RMSE vs Market ($): 10.49 | MAE vs Market ($): 7.13
+  [VAL] RMSE vs BS (norm): 0.015395 | RMSE vs Market ($): 10.31 | MAE vs Market ($): 6.92
+Ep 12000/15000 | L=6.11e+00 | pde=4.22e-01 | w=1.00 | tc=8.10e-07 | w=12466.40 | bc=2.15e-06 | w=24694.33 | data=2.32e-04 | w=24267.80 | lr=1.0e-04
+  [VAL] RMSE vs BS (norm): 0.015214 | RMSE vs Market ($): 10.21 | MAE vs Market ($): 6.86
+  [VAL] RMSE vs BS (norm): 0.015371 | RMSE vs Market ($): 10.30 | MAE vs Market ($): 6.91
+Ep 14000/15000 | L=5.44e+00 | pde=3.48e-01 | w=1.00 | tc=1.66e-07 | w=12807.84 | bc=7.16e-07 | w=22361.19 | data=2.42e-04 | w=20980.97 | lr=2.1e-05
+  [VAL] RMSE vs BS (norm): 0.014812 | RMSE vs Market ($): 10.27 | MAE vs Market ($): 6.92
+  [VAL] RMSE vs BS (norm): 0.014853 | RMSE vs Market ($): 10.22 | MAE vs Market ($): 6.89
+
+Training complete in 330.3s
+Reporting final-epoch state (best rmse_mkt=9.347317 @ ep 4000 kept as stability diagnostic only)
+  → RMSE vs Market: $10.22
+
+============================================================
+FOLD 5/9: Aug2020
+  Train: start → 2020-08-01  |  Test: 2020-08-01 → 2020-09-01
+============================================================
+  Train: 30,314  Test: 5,167
+  σ_fixed: 0.7325
+Training: mode=hybrid, epochs=15000, lr=0.001
+  Architecture: Modified MLP + RWF (μ=0.75)
+  Pricing net params: 37,698
+  Loss terms: ['pde', 'tc', 'bc', 'data']
+======================================================================
+Ep     1/15000 | L=5.05e+06 | pde=3.51e+06 | w=1.00 | tc=9.11e+00 | w=28983.38 | bc=1.06e+01 | w=72466.83 | data=7.06e+00 | w=72532.30 | lr=1.0e-03
+  [VAL] RMSE vs BS (norm): 0.032849 | RMSE vs Market ($): 15.35 | MAE vs Market ($): 12.85
+  ** New best rmse_mkt: 15.349274 (diagnostic only)
+Ep  2000/15000 | L=5.99e+01 | pde=5.65e+00 | w=1.00 | tc=4.25e-04 | w=24266.01 | bc=2.22e-04 | w=60691.98 | data=5.11e-04 | w=59762.94 | lr=9.6e-04
+  [VAL] RMSE vs BS (norm): 0.022290 | RMSE vs Market ($): 11.29 | MAE vs Market ($): 8.55
+  ** New best rmse_mkt: 11.292451 (diagnostic only)
+  [VAL] RMSE vs BS (norm): 0.015742 | RMSE vs Market ($): 10.05 | MAE vs Market ($): 7.01
+  ** New best rmse_mkt: 10.052816 (diagnostic only)
+Ep  4000/15000 | L=3.34e+01 | pde=2.10e+00 | w=1.00 | tc=5.00e-05 | w=20445.94 | bc=2.20e-04 | w=50781.40 | data=3.90e-04 | w=48987.09 | lr=8.4e-04
+  [VAL] RMSE vs BS (norm): 0.013685 | RMSE vs Market ($): 8.63 | MAE vs Market ($): 5.07
+  ** New best rmse_mkt: 8.629802 (diagnostic only)
+  [VAL] RMSE vs BS (norm): 0.012628 | RMSE vs Market ($): 8.38 | MAE vs Market ($): 4.73
+  ** New best rmse_mkt: 8.384045 (diagnostic only)
+Ep  6000/15000 | L=1.46e+01 | pde=8.56e-01 | w=1.00 | tc=1.69e-05 | w=17259.47 | bc=2.42e-06 | w=46510.01 | data=3.32e-04 | w=40206.31 | lr=6.6e-04
+  [VAL] RMSE vs BS (norm): 0.012496 | RMSE vs Market ($): 8.14 | MAE vs Market ($): 4.49
+  ** New best rmse_mkt: 8.142539 (diagnostic only)
+  [VAL] RMSE vs BS (norm): 0.012761 | RMSE vs Market ($): 8.05 | MAE vs Market ($): 4.50
+  ** New best rmse_mkt: 8.052580 (diagnostic only)
+Ep  8000/15000 | L=1.19e+01 | pde=7.77e-01 | w=1.00 | tc=1.19e-05 | w=14798.55 | bc=1.17e-05 | w=39576.41 | data=3.15e-04 | w=33280.31 | lr=4.5e-04
+  [VAL] RMSE vs BS (norm): 0.012796 | RMSE vs Market ($): 7.97 | MAE vs Market ($): 4.45
+  ** New best rmse_mkt: 7.969496 (diagnostic only)
+  [VAL] RMSE vs BS (norm): 0.014264 | RMSE vs Market ($): 7.84 | MAE vs Market ($): 4.63
+  ** New best rmse_mkt: 7.842027 (diagnostic only)
+Ep 10000/15000 | L=9.27e+00 | pde=5.46e-01 | w=1.00 | tc=2.21e-06 | w=12958.89 | bc=1.28e-06 | w=34893.71 | data=3.09e-04 | w=27962.27 | lr=2.6e-04
+  [VAL] RMSE vs BS (norm): 0.012462 | RMSE vs Market ($): 7.32 | MAE vs Market ($): 4.19
+  ** New best rmse_mkt: 7.324616 (diagnostic only)
+  [VAL] RMSE vs BS (norm): 0.012759 | RMSE vs Market ($): 7.69 | MAE vs Market ($): 4.36
+Ep 12000/15000 | L=8.13e+00 | pde=5.05e-01 | w=1.00 | tc=4.93e-07 | w=12252.95 | bc=8.95e-07 | w=30982.75 | data=3.05e-04 | w=24865.52 | lr=1.0e-04
+  [VAL] RMSE vs BS (norm): 0.012326 | RMSE vs Market ($): 7.58 | MAE vs Market ($): 4.26
+  [VAL] RMSE vs BS (norm): 0.012263 | RMSE vs Market ($): 7.38 | MAE vs Market ($): 4.21
+Ep 14000/15000 | L=7.41e+00 | pde=4.15e-01 | w=1.00 | tc=1.40e-07 | w=13498.71 | bc=3.28e-07 | w=29731.88 | data=3.21e-04 | w=21756.00 | lr=2.1e-05
+  [VAL] RMSE vs BS (norm): 0.012278 | RMSE vs Market ($): 7.42 | MAE vs Market ($): 4.24
+  [VAL] RMSE vs BS (norm): 0.012348 | RMSE vs Market ($): 7.53 | MAE vs Market ($): 4.27
+
+Training complete in 326.7s
+Reporting final-epoch state (best rmse_mkt=7.324616 @ ep 10000 kept as stability diagnostic only)
+  → RMSE vs Market: $7.53
+
+============================================================
+FOLD 6/9: Sep2020
+  Train: start → 2020-09-01  |  Test: 2020-09-01 → 2020-10-01
+============================================================
+  Train: 35,481  Test: 6,361
+  σ_fixed: 0.7371
+Training: mode=hybrid, epochs=15000, lr=0.001
+  Architecture: Modified MLP + RWF (μ=0.75)
+  Pricing net params: 37,698
+  Loss terms: ['pde', 'tc', 'bc', 'data']
+======================================================================
+Ep     1/15000 | L=5.19e+06 | pde=3.60e+06 | w=1.00 | tc=9.11e+00 | w=29712.70 | bc=1.06e+01 | w=74298.79 | data=7.14e+00 | w=74327.36 | lr=1.0e-03
+  [VAL] RMSE vs BS (norm): 0.024966 | RMSE vs Market ($): 19.73 | MAE vs Market ($): 15.13
+  ** New best rmse_mkt: 19.728556 (diagnostic only)
+Ep  2000/15000 | L=7.80e+01 | pde=6.80e+00 | w=1.00 | tc=3.31e-04 | w=25549.70 | bc=2.61e-04 | w=61977.03 | data=7.37e-04 | w=63254.43 | lr=9.6e-04
+  [VAL] RMSE vs BS (norm): 0.023981 | RMSE vs Market ($): 23.64 | MAE vs Market ($): 20.52
+  [VAL] RMSE vs BS (norm): 0.023816 | RMSE vs Market ($): 18.00 | MAE vs Market ($): 13.29
+  ** New best rmse_mkt: 18.001870 (diagnostic only)
+Ep  4000/15000 | L=2.50e+01 | pde=2.32e+00 | w=1.00 | tc=5.53e-05 | w=21652.69 | bc=3.68e-05 | w=52371.58 | data=3.74e-04 | w=52183.03 | lr=8.4e-04
+  [VAL] RMSE vs BS (norm): 0.020523 | RMSE vs Market ($): 20.89 | MAE vs Market ($): 16.97
+  [VAL] RMSE vs BS (norm): 0.019009 | RMSE vs Market ($): 19.50 | MAE vs Market ($): 15.54
+Ep  6000/15000 | L=1.93e+01 | pde=1.53e+00 | w=1.00 | tc=2.67e-05 | w=18409.21 | bc=7.36e-05 | w=43700.53 | data=3.26e-04 | w=43025.10 | lr=6.6e-04
+  [VAL] RMSE vs BS (norm): 0.020118 | RMSE vs Market ($): 17.30 | MAE vs Market ($): 12.76
+  ** New best rmse_mkt: 17.299421 (diagnostic only)
+  [VAL] RMSE vs BS (norm): 0.018755 | RMSE vs Market ($): 18.77 | MAE vs Market ($): 14.52
+Ep  8000/15000 | L=1.22e+01 | pde=7.49e-01 | w=1.00 | tc=1.15e-05 | w=15625.09 | bc=3.23e-06 | w=37212.04 | data=3.14e-04 | w=35535.73 | lr=4.5e-04
+  [VAL] RMSE vs BS (norm): 0.020212 | RMSE vs Market ($): 16.95 | MAE vs Market ($): 12.26
+  ** New best rmse_mkt: 16.945026 (diagnostic only)
+  [VAL] RMSE vs BS (norm): 0.018816 | RMSE vs Market ($): 17.44 | MAE vs Market ($): 12.92
+Ep 10000/15000 | L=9.79e+00 | pde=5.76e-01 | w=1.00 | tc=3.74e-06 | w=13662.28 | bc=6.35e-06 | w=32577.36 | data=3.02e-04 | w=29618.91 | lr=2.6e-04
+  [VAL] RMSE vs BS (norm): 0.018592 | RMSE vs Market ($): 17.48 | MAE vs Market ($): 13.06
+  [VAL] RMSE vs BS (norm): 0.018524 | RMSE vs Market ($): 17.54 | MAE vs Market ($): 13.20
+Ep 12000/15000 | L=8.39e+00 | pde=4.70e-01 | w=1.00 | tc=2.40e-07 | w=14576.16 | bc=9.23e-07 | w=29529.78 | data=3.05e-04 | w=25873.80 | lr=1.0e-04
+  [VAL] RMSE vs BS (norm): 0.018087 | RMSE vs Market ($): 17.87 | MAE vs Market ($): 13.52
+  [VAL] RMSE vs BS (norm): 0.017955 | RMSE vs Market ($): 17.46 | MAE vs Market ($): 13.16
+Ep 14000/15000 | L=7.12e+00 | pde=3.96e-01 | w=1.00 | tc=1.39e-07 | w=17312.61 | bc=4.12e-07 | w=27503.11 | data=2.93e-04 | w=22927.55 | lr=2.1e-05
+  [VAL] RMSE vs BS (norm): 0.018272 | RMSE vs Market ($): 17.65 | MAE vs Market ($): 13.26
+  [VAL] RMSE vs BS (norm): 0.018402 | RMSE vs Market ($): 17.69 | MAE vs Market ($): 13.28
+
+Training complete in 325.9s
+Reporting final-epoch state (best rmse_mkt=16.945026 @ ep 8000 kept as stability diagnostic only)
+  → RMSE vs Market: $17.69
+
+============================================================
+FOLD 7/9: Oct2020
+  Train: start → 2020-10-01  |  Test: 2020-10-01 → 2020-11-01
+============================================================
+  Train: 41,842  Test: 5,968
+  σ_fixed: 0.7763
+Training: mode=hybrid, epochs=15000, lr=0.001
+  Architecture: Modified MLP + RWF (μ=0.75)
+  Pricing net params: 37,698
+  Loss terms: ['pde', 'tc', 'bc', 'data']
+======================================================================
+Ep     1/15000 | L=6.40e+06 | pde=4.43e+06 | w=1.00 | tc=9.11e+00 | w=36569.73 | bc=1.06e+01 | w=91538.08 | data=7.14e+00 | w=94403.54 | lr=1.0e-03
+  [VAL] RMSE vs BS (norm): 0.036144 | RMSE vs Market ($): 17.14 | MAE vs Market ($): 14.23
+  ** New best rmse_mkt: 17.135473 (diagnostic only)
+Ep  2000/15000 | L=9.44e+01 | pde=1.08e+01 | w=1.00 | tc=3.85e-04 | w=30740.85 | bc=9.59e-05 | w=78456.11 | data=8.26e-04 | w=77713.33 | lr=9.6e-04
+  [VAL] RMSE vs BS (norm): 0.024120 | RMSE vs Market ($): 10.50 | MAE vs Market ($): 8.50
+  ** New best rmse_mkt: 10.503888 (diagnostic only)
+  [VAL] RMSE vs BS (norm): 0.021335 | RMSE vs Market ($): 9.84 | MAE vs Market ($): 7.74
+  ** New best rmse_mkt: 9.840542 (diagnostic only)
+Ep  4000/15000 | L=3.71e+01 | pde=2.18e+00 | w=1.00 | tc=6.97e-05 | w=25598.99 | bc=1.58e-05 | w=65747.58 | data=5.04e-04 | w=63730.57 | lr=8.4e-04
+  [VAL] RMSE vs BS (norm): 0.016587 | RMSE vs Market ($): 6.76 | MAE vs Market ($): 4.43
+  ** New best rmse_mkt: 6.759137 (diagnostic only)
+  [VAL] RMSE vs BS (norm): 0.019179 | RMSE vs Market ($): 8.69 | MAE vs Market ($): 6.86
+Ep  6000/15000 | L=2.55e+01 | pde=1.25e+00 | w=1.00 | tc=1.24e-05 | w=21617.24 | bc=6.30e-06 | w=56678.90 | data=4.50e-04 | w=52452.79 | lr=6.6e-04
+  [VAL] RMSE vs BS (norm): 0.017082 | RMSE vs Market ($): 7.04 | MAE vs Market ($): 4.42
+  [VAL] RMSE vs BS (norm): 0.016422 | RMSE vs Market ($): 6.77 | MAE vs Market ($): 4.41
+Ep  8000/15000 | L=2.14e+01 | pde=1.05e+00 | w=1.00 | tc=1.40e-05 | w=18711.63 | bc=1.98e-05 | w=49378.63 | data=4.39e-04 | w=43581.59 | lr=4.5e-04
+  [VAL] RMSE vs BS (norm): 0.017114 | RMSE vs Market ($): 7.04 | MAE vs Market ($): 4.47
+  [VAL] RMSE vs BS (norm): 0.016607 | RMSE vs Market ($): 7.09 | MAE vs Market ($): 4.85
+Ep 10000/15000 | L=1.72e+01 | pde=7.70e-01 | w=1.00 | tc=2.27e-06 | w=16677.47 | bc=1.96e-06 | w=42743.83 | data=4.47e-04 | w=36402.79 | lr=2.6e-04
+  [VAL] RMSE vs BS (norm): 0.016271 | RMSE vs Market ($): 6.94 | MAE vs Market ($): 4.61
+  [VAL] RMSE vs BS (norm): 0.015968 | RMSE vs Market ($): 7.03 | MAE vs Market ($): 4.92
+Ep 12000/15000 | L=1.44e+01 | pde=6.14e-01 | w=1.00 | tc=2.52e-07 | w=19934.90 | bc=1.47e-06 | w=38086.65 | data=4.32e-04 | w=31811.73 | lr=1.0e-04
+  [VAL] RMSE vs BS (norm): 0.015873 | RMSE vs Market ($): 6.89 | MAE vs Market ($): 4.74
+  [VAL] RMSE vs BS (norm): 0.016355 | RMSE vs Market ($): 7.09 | MAE vs Market ($): 4.90
+Ep 14000/15000 | L=1.21e+01 | pde=5.46e-01 | w=1.00 | tc=3.02e-07 | w=19074.66 | bc=4.61e-07 | w=34835.44 | data=4.20e-04 | w=27464.56 | lr=2.1e-05
+  [VAL] RMSE vs BS (norm): 0.016363 | RMSE vs Market ($): 7.09 | MAE vs Market ($): 4.98
+  [VAL] RMSE vs BS (norm): 0.016100 | RMSE vs Market ($): 7.02 | MAE vs Market ($): 4.95
+
+Training complete in 328.4s
+Reporting final-epoch state (best rmse_mkt=6.759137 @ ep 4000 kept as stability diagnostic only)
+  → RMSE vs Market: $7.02
+
+============================================================
+FOLD 8/9: Nov2020
+  Train: start → 2020-11-01  |  Test: 2020-11-01 → 2020-12-01
+============================================================
+  Train: 47,810  Test: 6,420
+  σ_fixed: 0.7719
+Training: mode=hybrid, epochs=15000, lr=0.001
+  Architecture: Modified MLP + RWF (μ=0.75)
+  Pricing net params: 37,698
+  Loss terms: ['pde', 'tc', 'bc', 'data']
+======================================================================
+Ep     1/15000 | L=6.29e+06 | pde=4.33e+06 | w=1.00 | tc=9.11e+00 | w=35734.66 | bc=1.06e+01 | w=89437.57 | data=7.21e+00 | w=95386.75 | lr=1.0e-03
+  [VAL] RMSE vs BS (norm): 0.033612 | RMSE vs Market ($): 16.29 | MAE vs Market ($): 13.58
+  ** New best rmse_mkt: 16.286751 (diagnostic only)
+Ep  2000/15000 | L=8.07e+01 | pde=7.66e+00 | w=1.00 | tc=3.39e-04 | w=29997.13 | bc=2.11e-05 | w=79431.31 | data=7.84e-04 | w=78111.42 | lr=9.6e-04
+  [VAL] RMSE vs BS (norm): 0.025401 | RMSE vs Market ($): 10.72 | MAE vs Market ($): 8.34
+  ** New best rmse_mkt: 10.724778 (diagnostic only)
+  [VAL] RMSE vs BS (norm): 0.016638 | RMSE vs Market ($): 9.00 | MAE vs Market ($): 7.16
+  ** New best rmse_mkt: 9.004339 (diagnostic only)
+Ep  4000/15000 | L=3.56e+01 | pde=2.44e+00 | w=1.00 | tc=5.98e-05 | w=31669.46 | bc=1.67e-05 | w=66762.81 | data=4.50e-04 | w=66854.70 | lr=8.4e-04
+  [VAL] RMSE vs BS (norm): 0.019477 | RMSE vs Market ($): 11.29 | MAE vs Market ($): 10.03
+  [VAL] RMSE vs BS (norm): 0.017233 | RMSE vs Market ($): 8.93 | MAE vs Market ($): 6.86
+  ** New best rmse_mkt: 8.926468 (diagnostic only)
+Ep  6000/15000 | L=2.70e+01 | pde=1.25e+00 | w=1.00 | tc=1.89e-05 | w=27092.36 | bc=6.55e-06 | w=56830.76 | data=4.37e-04 | w=56801.57 | lr=6.6e-04
+  [VAL] RMSE vs BS (norm): 0.013713 | RMSE vs Market ($): 6.92 | MAE vs Market ($): 5.10
+  ** New best rmse_mkt: 6.920059 (diagnostic only)
+  [VAL] RMSE vs BS (norm): 0.013127 | RMSE vs Market ($): 6.78 | MAE vs Market ($): 5.25
+  ** New best rmse_mkt: 6.781417 (diagnostic only)
+Ep  8000/15000 | L=2.07e+01 | pde=1.02e+00 | w=1.00 | tc=1.13e-05 | w=22827.43 | bc=4.15e-06 | w=49165.08 | data=4.11e-04 | w=46764.27 | lr=4.5e-04
+  [VAL] RMSE vs BS (norm): 0.013969 | RMSE vs Market ($): 6.98 | MAE vs Market ($): 5.39
+  [VAL] RMSE vs BS (norm): 0.013925 | RMSE vs Market ($): 7.36 | MAE vs Market ($): 5.76
+Ep 10000/15000 | L=1.69e+01 | pde=7.36e-01 | w=1.00 | tc=2.41e-06 | w=19721.81 | bc=1.46e-06 | w=44081.77 | data=4.11e-04 | w=38959.59 | lr=2.6e-04
+  [VAL] RMSE vs BS (norm): 0.013686 | RMSE vs Market ($): 7.29 | MAE vs Market ($): 5.81
+  [VAL] RMSE vs BS (norm): 0.014956 | RMSE vs Market ($): 7.82 | MAE vs Market ($): 6.14
+Ep 12000/15000 | L=1.42e+01 | pde=5.63e-01 | w=1.00 | tc=6.79e-07 | w=18688.66 | bc=1.46e-06 | w=38182.20 | data=4.08e-04 | w=33197.97 | lr=1.0e-04
+  [VAL] RMSE vs BS (norm): 0.014222 | RMSE vs Market ($): 7.61 | MAE vs Market ($): 6.13
+  [VAL] RMSE vs BS (norm): 0.013893 | RMSE vs Market ($): 7.54 | MAE vs Market ($): 6.02
+Ep 14000/15000 | L=1.15e+01 | pde=4.53e-01 | w=1.00 | tc=2.76e-07 | w=17726.89 | bc=4.21e-07 | w=35254.56 | data=3.80e-04 | w=28936.05 | lr=2.1e-05
+  [VAL] RMSE vs BS (norm): 0.013769 | RMSE vs Market ($): 7.61 | MAE vs Market ($): 6.15
+  [VAL] RMSE vs BS (norm): 0.013593 | RMSE vs Market ($): 7.49 | MAE vs Market ($): 6.06
+
+Training complete in 329.1s
+Reporting final-epoch state (best rmse_mkt=6.781417 @ ep 7000 kept as stability diagnostic only)
+  → RMSE vs Market: $7.49
+
+============================================================
+FOLD 9/9: Dec2020
+  Train: start → 2020-12-01  |  Test: 2020-12-01 → 2021-01-01
+============================================================
+  Train: 54,230  Test: 5,438
+  σ_fixed: 0.7548
+Training: mode=hybrid, epochs=15000, lr=0.001
+  Architecture: Modified MLP + RWF (μ=0.75)
+  Pricing net params: 37,698
+  Loss terms: ['pde', 'tc', 'bc', 'data']
+======================================================================
+Ep     1/15000 | L=5.75e+06 | pde=3.96e+06 | w=1.00 | tc=9.11e+00 | w=32672.02 | bc=1.06e+01 | w=81736.17 | data=7.17e+00 | w=87292.76 | lr=1.0e-03
+  [VAL] RMSE vs BS (norm): 0.039682 | RMSE vs Market ($): 27.41 | MAE vs Market ($): 23.12
+  ** New best rmse_mkt: 27.411684 (diagnostic only)
+Ep  2000/15000 | L=9.38e+01 | pde=6.60e+00 | w=1.00 | tc=3.39e-04 | w=27151.39 | bc=2.97e-04 | w=68617.60 | data=8.09e-04 | w=71270.25 | lr=9.6e-04
+  [VAL] RMSE vs BS (norm): 0.017819 | RMSE vs Market ($): 15.32 | MAE vs Market ($): 12.13
+  ** New best rmse_mkt: 15.316879 (diagnostic only)
+  [VAL] RMSE vs BS (norm): 0.019461 | RMSE vs Market ($): 15.32 | MAE vs Market ($): 11.82
+Ep  4000/15000 | L=3.56e+01 | pde=3.49e+00 | w=1.00 | tc=6.91e-05 | w=23467.02 | bc=5.28e-05 | w=61428.35 | data=4.62e-04 | w=58950.75 | lr=8.4e-04
+  [VAL] RMSE vs BS (norm): 0.014845 | RMSE vs Market ($): 12.95 | MAE vs Market ($): 9.55
+  ** New best rmse_mkt: 12.954482 (diagnostic only)
+  [VAL] RMSE vs BS (norm): 0.013271 | RMSE vs Market ($): 11.32 | MAE vs Market ($): 8.74
+  ** New best rmse_mkt: 11.315232 (diagnostic only)
+Ep  6000/15000 | L=2.15e+01 | pde=1.12e+00 | w=1.00 | tc=2.16e-05 | w=19677.26 | bc=2.40e-05 | w=51024.57 | data=3.87e-04 | w=48313.01 | lr=6.6e-04
+  [VAL] RMSE vs BS (norm): 0.013076 | RMSE vs Market ($): 11.21 | MAE vs Market ($): 8.48
+  ** New best rmse_mkt: 11.210397 (diagnostic only)
+  [VAL] RMSE vs BS (norm): 0.012308 | RMSE vs Market ($): 10.72 | MAE vs Market ($): 8.15
+  ** New best rmse_mkt: 10.724158 (diagnostic only)
+Ep  8000/15000 | L=1.66e+01 | pde=8.60e-01 | w=1.00 | tc=8.49e-06 | w=16844.80 | bc=4.60e-06 | w=43472.66 | data=3.87e-04 | w=39954.19 | lr=4.5e-04
+  [VAL] RMSE vs BS (norm): 0.014897 | RMSE vs Market ($): 11.21 | MAE vs Market ($): 8.82
+  [VAL] RMSE vs BS (norm): 0.013317 | RMSE vs Market ($): 10.80 | MAE vs Market ($): 8.32
+Ep 10000/15000 | L=1.34e+01 | pde=5.91e-01 | w=1.00 | tc=2.24e-06 | w=14802.45 | bc=3.04e-06 | w=37100.81 | data=3.77e-04 | w=33596.30 | lr=2.6e-04
+  [VAL] RMSE vs BS (norm): 0.013656 | RMSE vs Market ($): 10.81 | MAE vs Market ($): 8.39
+  [VAL] RMSE vs BS (norm): 0.014623 | RMSE vs Market ($): 11.38 | MAE vs Market ($): 8.75
+Ep 12000/15000 | L=1.18e+01 | pde=4.53e-01 | w=1.00 | tc=5.55e-07 | w=13680.69 | bc=1.09e-06 | w=32563.93 | data=3.85e-04 | w=29416.48 | lr=1.0e-04
+  [VAL] RMSE vs BS (norm): 0.012523 | RMSE vs Market ($): 10.49 | MAE vs Market ($): 8.22
+  ** New best rmse_mkt: 10.490863 (diagnostic only)
+  [VAL] RMSE vs BS (norm): 0.012570 | RMSE vs Market ($): 10.74 | MAE vs Market ($): 8.40
+Ep 14000/15000 | L=1.00e+01 | pde=3.63e-01 | w=1.00 | tc=2.19e-07 | w=13773.24 | bc=3.18e-07 | w=30068.15 | data=3.80e-04 | w=25361.56 | lr=2.1e-05
+  [VAL] RMSE vs BS (norm): 0.012868 | RMSE vs Market ($): 10.71 | MAE vs Market ($): 8.34
+  [VAL] RMSE vs BS (norm): 0.012373 | RMSE vs Market ($): 10.55 | MAE vs Market ($): 8.26
+
+Training complete in 329.0s
+Reporting final-epoch state (best rmse_mkt=10.490863 @ ep 12000 kept as stability diagnostic only)
+  → RMSE vs Market: $10.55
+
+
+======================================================================================
+WALK-FORWARD RESULTS: arch=modified, mode=hybrid, μ=0.75
+  Reporting final-epoch RMSE; best/drift columns are stability diagnostics only
+======================================================================================
+Fold       |  σ_fix |  final($) |  best($) | best@ep |   drift | time(s)
+--------------------------------------------------------------------------------------
+Apr2020    |  0.729 |      3.04 |     2.80 |    6000 |   +0.24 |     334
+May2020    |  0.776 |      2.32 |     2.02 |    6000 |   +0.30 |     329
+Jun2020    |  0.738 |      2.67 |     2.67 |   15000 |   +0.00 |     330
+Jul2020    |  0.712 |     10.22 |     9.35 |    4000 |   +0.88 |     330
+Aug2020    |  0.733 |      7.53 |     7.32 |   10000 |   +0.21 |     327
+Sep2020    |  0.737 |     17.69 |    16.95 |    8000 |   +0.74 |     326
+Oct2020    |  0.776 |      7.02 |     6.76 |    4000 |   +0.26 |     328
+Nov2020    |  0.772 |      7.49 |     6.78 |    7000 |   +0.71 |     329
+Dec2020    |  0.755 |     10.55 |    10.49 |   12000 |   +0.06 |     329
+--------------------------------------------------------------------------------------
+Pooled     |        |      9.71 |          |         |         |    2962   ← headline
+Mean(fold) |        |      7.62 |          |         |   +0.38 |
+Std(fold)  |        |      4.60 |          |         |    0.30 |
+Worst      |        |     17.69 |          |         |         |    (Sep2020)
+
+Results saved to runs/walk_forward/modified_hybrid_mu0.75/
+============================================
+Done: Thu Apr 16 03:14:22 AM EDT 2026
+============================================
