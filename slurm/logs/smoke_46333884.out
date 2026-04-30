@@ -1,0 +1,45 @@
+Node:  dcc-core-gpu-ferc-s-h36-6
+GPU:   NVIDIA GeForce RTX 2080 Ti
+Date:  Thu Apr 30 02:58:34 AM EDT 2026
+CUDA: True
+Device: NVIDIA GeForce RTX 2080 Ti
+Device: cuda
+Loading and preprocessing data...
+Full dataset: 59,668 obs, 2020-01-02 → 2020-12-31
+
+============================================================
+FOLD 1/1: Nov2020
+  Train: start → 2020-11-01  |  Test: 2020-11-01 → 2020-12-01
+============================================================
+  Train: 41,842  Val: 5,968  Test: 6,420
+  σ_fixed: 0.7763
+Training: mode=hybrid, epochs=1500, lr=0.001
+  Architecture: Modified MLP + RWF (μ=0.75)
+  Pricing net params: 37,698
+  Loss terms: ['pde', 'tc', 'bc', 'data']
+======================================================================
+Ep     1/1500 | L=6.40e+06 | pde=4.43e+06 | w=1.00 | tc=9.11e+00 | w=36569.73 | bc=1.06e+01 | w=91538.07 | data=7.14e+00 | w=94403.53 | lr=1.0e-03
+  [VAL] ep   500  val RMSE($): 22.3317  | spread: 206.115  | OTM/ATM/ITM: 21.759/23.943/22.433 ★
+  [VAL] ep  1000  val RMSE($): 9.6586  | spread: 60.211  | OTM/ATM/ITM: 10.019/7.260/10.692 ★
+  [VAL] ep  1500  val RMSE($): 8.4009  | spread: 43.902  | OTM/ATM/ITM: 8.575/7.188/9.034 ★
+
+Restored model to val-best epoch 1500 (val rmse_mkt=8.400899)
+
+Training complete in 45.2s
+REPORTED (val-best) test RMSE($): 9.0984  | spread: 50.574  | OTM/ATM/ITM: 9.081/10.013/8.462
+  → REPORTED test RMSE vs Market: $9.10 (val-best epoch: 1500)
+
+
+======================================================================================
+WALK-FORWARD RESULTS: arch=modified, mode=hybrid, μ=0.75
+  Single-phase val-best reporting (val held out, test eval'd once on snapshot)
+====================================================================================================
+Fold       |  σ_fix |     E* |  rep($) | spread |      OTM/ATM/ITM |   arb% |   time
+----------------------------------------------------------------------------------------------------
+Nov2020    |  0.776 |   1500 |    9.10 |  50.57 |  9.08/10.01/8.46 |  96.0% |     45
+----------------------------------------------------------------------------------------------------
+Pooled     |        |        |    9.10 |  50.57 |  9.08/10.01/8.46 |  96.0% |   ← headline
+Mean(fold) |        |   1500 |    9.10 |  E*: mean=1500  std=0  min=1500 max=1500
+
+Results saved to runs/smoke/modified_hybrid_mu0.75/
+Smoke test done: Thu Apr 30 03:00:29 AM EDT 2026
