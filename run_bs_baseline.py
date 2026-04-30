@@ -37,9 +37,12 @@ def main():
 
     results = []
     for i, fold in enumerate(FOLDS):
-        train_df, test_df = make_fold(
+        # BS baseline doesn't use a val set; concat val into train so the
+        # σ_fixed estimate uses the same data the PINN sees as train+val.
+        train_df, val_df, test_df = make_fold(
             df, train_end=fold["train_end"],
             test_start=fold["test_start"], test_end=fold["test_end"],
+            val_months=0,  # disable val carve — train_df = full train window
         )
         if len(test_df) == 0:
             print(f"  WARNING: no test data for {fold['name']}, skipping")

@@ -1,7 +1,7 @@
 #!/bin/bash
 # ============================================================
-# Quick smoke test: one fold, 500 epochs, one config.
-# Run this first to verify GPU + env are working before
+# Quick smoke test: one fold, 1500 epochs, one config.
+# Verifies GPU + env + val-best snapshot pipeline before
 # submitting the full benchmark array.
 #
 # Submit with:
@@ -28,12 +28,15 @@ echo "Date:  $(date)"
 # Verify torch sees the GPU
 python -c "import torch; print('CUDA:', torch.cuda.is_available()); print('Device:', torch.cuda.get_device_name(0))"
 
-# One fold, 500 epochs — should finish in ~2 min
+# One fold, 1500 epochs — should finish in ~3-4 min on a 2080.
+# Tests both warm-start machinery (it doesn't fire here) AND val-best
+# snapshot/restore (it does).
 python run_walk_forward.py \
     --arch modified \
     --mode hybrid \
     --rwf_mu 0.75 \
-    --epochs 500 \
+    --epochs 1500 \
+    --val_months 1 \
     --folds Nov2020 \
     --output_dir runs/smoke
 

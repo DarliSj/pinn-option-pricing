@@ -14,7 +14,7 @@ The system evolves through three stages, each adding capability while reusing th
 
 ## Project Structure
 
-```         
+```
 .
 ├── data/
 │   └── TSLA_2020_Split_Adjusted.csv       # Source data (split-adjusted)
@@ -24,24 +24,47 @@ The system evolves through three stages, each adding capability while reusing th
 │   ├── data.py                              # Loading, filtering, fold construction, arrays
 │   ├── model.py                             # All neural network architectures
 │   ├── losses.py                            # PDE residual, loss terms, grad-norm balancing
-│   ├── training.py                          # Training loop, validation, checkpointing
+│   ├── training.py                          # Training loop, val-best snapshot, single test eval
 │   ├── baselines.py                         # BS constant-sigma baseline evaluator
-│   └── diagnostics.py                       # Training plots, solution surfaces, vol diagnostics
+│   └── diagnostics.py                       # Training plots, solution / vol surfaces, arbitrage check
 │
 ├── run_stage0.py                            # Single train/test split (development)
 ├── run_walk_forward.py                      # Walk-forward backtest (Stage 1 benchmarking)
 ├── run_bs_baseline.py                       # BS baseline across all folds
 ├── run_stage2.py                            # Learnable vol surface walk-forward
 │
-├── runs/                                    # All output (checkpoints, logs, plots, results.json)
+├── scripts/                                 # Report-time aggregation + plotting
+│   ├── run_local_baselines.sh               # Run BS baseline locally (no GPU)
+│   ├── build_master_table.py                # Aggregate all results.json → master_table.csv
+│   └── make_report_plots.py                 # Generate report figures from master tables
+│
+├── slurm/                                   # SLURM scripts for Duke DCC
+│   ├── run_smoke_test.sh                    # 1-fold smoke test
+│   ├── run_benchmark.sh                     # B0–B7 array (8 configs)
+│   ├── run_stage2_smoke.sh                  # Stage 2 smoke test
+│   ├── run_stage2.sh                        # Stage 2 array (cvol + avol)
+│   ├── submit_all.sh                        # Submits smoke → B0–B7 with dependency
+│   └── submit_stage2.sh                     # Submits Stage 2 smoke → cvol + avol
+│
+├── runs/                                    # All training output (checkpoints, logs, plots, results.json)
 │   ├── walk_forward/
-│   │   ├── standard_physics/                # B0: Standard MLP, physics only
-│   │   ├── standard_hybrid/                 # B1: Standard MLP, physics + market data
-│   │   ├── modified_physics_mu{X}/          # B2: Modified MLP, physics only
-│   │   └── modified_hybrid_mu{X}/           # B3-B5: Modified MLP, hybrid, mu sweep
+│   │   ├── standard_physics/                # B0
+│   │   ├── standard_hybrid/                 # B1
+│   │   ├── modified_physics_mu{0.5,0.75,1.0}/   # B2-B4
+│   │   └── modified_hybrid_mu{0.5,0.75,1.0}/    # B5-B7
 │   └── stage2/
-│       ├── cvol/                            # C-Vol (multiplicative) walk-forward
-│       └── avol/                            # A-Vol (direct) walk-forward
+│       ├── cvol/                            # C-Vol (multiplicative)
+│       ├── avol/                            # A-Vol (direct softplus)
+│       └── *_scratch/                       # --from_scratch ablations (no warm-start)
+│
+├── results/
+│   └── bs_baseline/                         # BS analytical baseline results.json
+│
+├── reports/                                 # Built by scripts/build_master_table.py + make_report_plots.py
+│   ├── master_table.csv                     # One row per config: pooled metrics
+│   ├── master_table_short.md                # Markdown table for the writeup
+│   ├── per_fold_table.csv                   # One row per (config, fold)
+│   └── figures/*.png                        # Comparison + diagnostic plots
 │
 ├── docs/
 │   ├── BENCHMARKING_PLAN.md                 # Authoritative spec for the benchmark table
@@ -59,8 +82,8 @@ All PINN computations use normalized coordinates to improve numerical conditioni
 | Symbol  | Definition                     | Range            |
 |---------|--------------------------------|------------------|
 | `m`     | Moneyness = S/K                | [0.65, 1.35]     |
-| `tau`   | Time to expiry = T - t (years) | [\~0.008, \~0.5] |
-| `v_hat` | Normalized price = V/K         | [0, \~0.5]       |
+| `tau`   | Time to expiry = T - t (years) | [~0.008, ~0.5]  |
+| `v_hat` | Normalized price = V/K         | [0, ~0.5]        |
 
 The network learns `v_hat(m, tau)`. Dollar prices are recovered as `V = v_hat * K`.
 
@@ -68,306 +91,216 @@ The network learns `v_hat(m, tau)`. Dollar prices are recovered as `V = v_hat * 
 
 ## Data Pipeline (`src/data.py`)
 
-All stages share the same data pipeline:
-
-```         
-CSV  ──>  load_and_preprocess()  ──>  Full DataFrame (59k rows)
+```
+CSV  ──>  load_and_preprocess()  ──>  Full DataFrame (~59k rows)
                                            │
                     ┌──────────────────────┴──────────────────────┐
-              Stage 0 (dev)                              Stage 1/2 (walk-forward)
+              Stage 0 (dev)                              Stage 1 / 2 (walk-forward)
                     │                                            │
           make_temporal_split()                    for each fold in FOLDS:
-          (fixed: Nov 2020)                         make_fold(train_end, test_start, test_end)
-                    │                                            │
-                    └──────────────────────┬──────────────────────┘
-                                           │
-                              ┌─────────────┴─────────────────┐
-                              │                               │
-                     compute_constants(train_df)     df_to_arrays(train_df)
-                              │                      df_to_arrays(test_df)
-                    sigma_fixed = median ATM IV               │
-                    r_fixed = median interest rate    Numpy arrays: m, tau,
-                    domain bounds: m_min/max, ...     vhat, mid, K
-                              │
-                    build_boundary_terminal(config, sigma, r)
-                              │
-                    TC: v_hat = max(m-1, 0) at tau=0
-                    BC_lo: BS(m_min, tau) for all tau
-                    BC_hi: BS(m_max, tau) for all tau
+                                                    make_fold(train_end, test_start, test_end,
+                                                              val_months=1)
+                                                              │
+                                                  ┌───────────┼───────────┐
+                                                train_df    val_df      test_df
 ```
 
-**Key design choice:** `sigma_fixed` and `r_fixed` are computed from training data only (no lookahead). Each walk-forward fold recomputes them from its own expanding training window.
+`make_fold` returns three disjoint slices:
+
+```
+                test_window  =  M_f                       ← held out
+                val_window   =  last `val_months` months  ← held out
+                train_window =  everything else before    ← model trains here
+```
+
+`val_months` defaults to 1 (val = the calendar month immediately preceding the test month). The model is trained ONLY on `train_window`. Val drives val-best snapshot selection during training. Test is evaluated ONCE after the snapshot is restored.
 
 ### Preprocessing filters (applied once)
 
-1.  Volume \>= 50 (liquidity)
-2.  1-day lagged daily mean implied volatility
-3.  Triple Witching week exclusion (abnormal pricing)
-4.  Moneyness in [0.65, 1.35]
-5.  Time-to-expiry \> 3 days
-6.  Interest rate: % to decimal
+1. Volume ≥ 50 (liquidity)
+2. 1-day lagged daily mean implied volatility
+3. Triple Witching week exclusion (abnormal pricing)
+4. Moneyness in [0.65, 1.35]
+5. Time-to-expiry > 3 days
+6. Interest rate: % to decimal
 
 ------------------------------------------------------------------------
 
-## Walk-Forward Validation
+## Walk-Forward Validation (Stage 1 / 2)
 
-The benchmarking uses **expanding-window walk-forward** validation: 9 monthly test folds from April through December 2020. Training always starts from the beginning of the dataset.
+9 monthly test folds from April through December 2020. Expanding window: training always starts from the beginning of the dataset. The val window for fold `M_f` is `M_{f-1}` (carved as the last month of what would otherwise be train).
 
-```         
-Fold 1 (Apr): Train [Jan─Mar]  Test [Apr]
-Fold 2 (May): Train [Jan─Apr]  Test [May]
-Fold 3 (Jun): Train [Jan─May]  Test [Jun]
+```
+Fold 1 (Apr): Train [Jan─Feb]  Val [Mar]  Test [Apr]
+Fold 2 (May): Train [Jan─Mar]  Val [Apr]  Test [May]
+Fold 3 (Jun): Train [Jan─Apr]  Val [May]  Test [Jun]
 ...
-Fold 9 (Dec): Train [Jan─Nov]  Test [Dec]
+Fold 9 (Dec): Train [Jan─Oct]  Val [Nov]  Test [Dec]
 ```
 
-This mimics real deployment: the model is retrained monthly on all available history and tested on the next unseen month. Each fold gets its own `sigma_fixed` (from its training window), its own boundary conditions, and its own collocation points.
+This mimics real deployment: the model is retrained monthly on history that excludes the most recent month (held out as val) and tested on the next unseen month. Each fold gets its own `sigma_fixed` (from its training window only — no val/test leakage), its own boundary conditions, and its own collocation points.
 
-### Reporting
+### Reporting protocol — single-phase val-best snapshot
 
--   **Pooled RMSE** (headline): `sqrt(sum_all_folds(squared_errors) / sum_all_folds(n_test))` -- treats every option equally regardless of fold size
--   **Mean +/- Std of per-fold RMSE**: stability diagnostic -- high std means the model is inconsistent across market regimes
--   **Worst fold**: robustness check
--   **Drift gap**: `final_epoch_metric - best_epoch_metric` -- quantifies late-training degradation. We report final-epoch numbers (not best-of), so drift gap tells us if the model peaked early.
+The reported test number for each fold is produced by:
+
+1. Train on `train_window` only (`val_window` and `test_window` are held out).
+2. Every `val_every` epochs (500 for Stage 1, 250 for Stage 2), evaluate val RMSE.
+3. Whenever val RMSE improves, snapshot the model state to CPU.
+4. After the training loop, restore the val-best snapshot.
+5. Evaluate `test_window` exactly ONCE on the restored model.
+
+The reported `final_*` metrics are from that single end-of-training test eval. The val curve is recorded in history for plotting; the test set is touched exactly once per fold. The saved fold checkpoint IS the val-best snapshot — Stage 2 warm-starts from this.
+
+### Headline metrics
+
+- **Pooled RMSE** (headline): `sqrt(sum_all_folds(squared_errors) / sum_all_folds(n_test))` — treats every option equally regardless of fold size.
+- **Mean ± Std of per-fold RMSE**: stability across market regimes.
+- **Worst-fold RMSE**: robustness check.
+- **Pooled RMSE in half-spread units**: residual / (spread/2). Values ≤ 1 mean errors are inside the bid-ask spread (essentially perfect for a market-making sense).
+- **Stratified RMSE (OTM / ATM / ITM)**: where in moneyness the surface is most/least accurate. Bands: OTM `m < 0.97`, ATM `0.97 ≤ m ≤ 1.03`, ITM `m > 1.03`.
+- **No-arbitrage diagnostic**: % of (m, τ) grid points where `∂²v̂/∂m² < 0` (butterfly violation) or `∂v̂/∂τ < 0` (calendar violation). 0% = arbitrage-free price surface.
+- **E\*_f**: the val-best epoch per fold. Distribution across folds tells us how training-time stability varies with the data window.
 
 ------------------------------------------------------------------------
 
-## Neural Network Architectures (`src/model.py`)
+## Architectures (`src/model.py`)
 
 ### PricingNet (Modified MLP + RWF)
 
-The primary architecture, used for B2-B5 benchmarks. Three enhancements from Wang et al. 2023:
+The primary architecture, used for B2–B7. Three enhancements from Wang et al. 2023:
 
-```         
+```
 Input (m, tau)
-    │
     ▼
-FourierFeatureEmbedding(scale=1.0)     ──>  [sin(2pi*B*x), cos(2pi*B*x)]  dim=128
+FourierFeatureEmbedding(scale=1.0)        →  [sin(2πB·x), cos(2πB·x)]  dim=128
     │
-    ├──> Encoder U: RWFLinear(128→64) + tanh     (computed once, reused)
-    ├──> Encoder V: RWFLinear(128→64) + tanh     (computed once, reused)
-    │
+    ├──> Encoder U: RWFLinear(128→64) + tanh    (computed once, reused)
+    ├──> Encoder V: RWFLinear(128→64) + tanh    (computed once, reused)
     ▼
 Modified Hidden Layer 1: RWFLinear(128→64) + tanh
-    gating:  g = h * U + (1-h) * V                <── keeps input gradients alive
-    │
+    gating:  g = h ⊙ U + (1-h) ⊙ V             ← keeps input gradients alive
     ▼
-Modified Hidden Layer 2-4: same pattern
-    │
+Modified Hidden Layers 2-4: same pattern
     ▼
-RWFLinear(64→1)  ──>  v_hat(m, tau)
+RWFLinear(64→1)  →  v_hat(m, tau)
 ```
 
 **Why each component matters:**
+- **Fourier features**: maps low-dim (m, τ) into spectral space so MLPs can fit high-frequency PDE solutions.
+- **RWF (Random Weight Factorization)**: `W = diag(exp(s)) · V` gives each neuron an adaptive learning rate. The `mu` parameter controls initial magnitude.
+- **Modified MLP gating**: prevents BC/TC gradient vanishing through the deep `tanh` chain.
 
--   **Fourier features**: Maps low-dimensional (m, tau) into high-dimensional spectral space. Without this, MLPs struggle to learn high-frequency PDE solutions.
--   **RWF (Random Weight Factorization)**: W = diag(exp(s)) \@ V gives each neuron an adaptive learning rate. The `mu` parameter controls initial magnitude -- lower mu means smaller initial weights, gentler start.
--   **Modified MLP (U, V encoders with gating)**: The gating `g = h*U + (1-h)*V` at every layer creates skip-connection-like paths from the input embedding. This prevents BC/TC gradient vanishing through deep tanh chains -- the key fix that eliminated the drift problem.
-
-\~37,700 parameters.
+~37,700 parameters.
 
 ### StandardPricingNet (Naive Baseline)
 
-Used for B0/B1 benchmarks. Fourier features + plain MLP (no RWF, no Modified MLP). This is the architecture from the original notebook before drift fixes. Expected to suffer from BC/TC gradient vanishing.
-
-```         
-Input (m, tau)  ──>  Fourier  ──>  Linear(128→64)+tanh  ──>  ...  ──>  Linear(64→1)
-```
-
-\~37,500 parameters (similar count, different architecture).
+Used for B0/B1. Fourier features + plain MLP (no RWF, no gating). ~37,500 parameters. Expected to suffer from BC/TC gradient vanishing.
 
 ### VolatilityNet (Stage 2)
 
-Small RWF MLP that learns the volatility surface sigma(m, tau). Intentionally simple:
+Small RWF MLP that learns `sigma_hat(m, tau)`. ~5,000 parameters. No Modified MLP gating — the vol surface has no payoff kink.
 
-```         
-Input (m, tau)
-    │
-    ▼
-FourierFeatureEmbedding(scale=0.5)     <── lower scale: vol surface is smoother
-    │
-    ▼
-RWFLinear(128→32) + tanh
-    │
-RWFLinear(32→32) + tanh
-    │
-RWFLinear(32→1)  ──>  raw z (pre-activation)
-```
+### Volatility wrappers
 
-\~5,000 parameters. No Modified MLP -- the vol surface has no payoff kink. The raw output `z` is passed to a wrapper that applies the appropriate activation.
+- **CVolWrapper (multiplicative, primary contribution):**
+  `sigma_hat = sqrt(softplus(z) · sigma_0²)` where `softplus(z)` is the learned multiplier μ and `sigma_0 = sigma_fixed` (frozen buffer). Initialization: μ ≈ 1 everywhere → `sigma_hat ≈ sigma_0`.
+- **AVolWrapper (direct, comparator):**
+  `sigma_hat = softplus(z)`. Initialization: `sigma_hat ≈ sigma_fixed` everywhere.
 
-### Volatility Wrappers
-
-**CVolWrapper (Multiplicative, primary contribution):**
-
-```         
-sigma_hat = sqrt(softplus(z) * sigma_0^2)
-
-where mu(m,tau) = softplus(z) is the learned multiplier
-      sigma_0 = sigma_fixed (frozen buffer from training data)
-```
-
-The network learns *deviations* from sigma_0, not absolute vol. At initialization, mu = 1 everywhere (output layer weights zeroed, bias set so softplus(bias) = 1). One regularization term: L_reg = mean((mu - 1)\^2).
-
-**AVolWrapper (Direct, standard comparator):**
-
-```         
-sigma_hat = softplus(z)
-```
-
-The network directly outputs volatility. At initialization, sigma_hat = sigma_fixed everywhere. Three smoothness regularization terms (derivatives of sigma_hat wrt m and tau).
+Both wrappers expose `get_sigma_squared()` which the PDE residual uses directly to avoid an unnecessary `sqrt(...)²` round-trip.
 
 ------------------------------------------------------------------------
 
 ## Loss Functions (`src/losses.py`)
 
-### PDE Residual (all stages)
+### PDE residual
 
-The Black-Scholes PDE in normalized coordinates:
-
-```         
-R = dv/dtau - 0.5 * sigma^2 * m^2 * d2v/dm2 - r * m * dv/dm + r * v
+```
+R = ∂v/∂τ - 0.5 · σ² · m² · ∂²v/∂m² - r · m · ∂v/∂m + r · v
 ```
 
-Computed via PyTorch automatic differentiation (requires `tanh` activation for smooth second derivatives). `R = 0` everywhere if the solution satisfies the PDE.
+Computed via PyTorch automatic differentiation (requires `tanh` activation for smooth second derivatives). `σ²` is either constant (Stage 0/1) or `vol_model.get_sigma_squared(m, τ)` (Stage 2, graph-connected so gradients flow into the vol net).
 
-**Stage 0/1:** `sigma` is a scalar constant (`sigma_fixed`). **Stage 2:** `sigma` is `vol_model(m, tau)`, a graph-connected tensor. Gradients from L_pde flow through sigma into the vol net -- this is how the vol network learns what volatility surface satisfies no-arbitrage.
-
-### Loss Terms
+### Loss terms
 
 | Loss | Formula | Present in |
 |----|----|----|
-| `L_pde` | `mean(R^2)` over collocation points | All modes |
-| `L_tc` | `mean((v_pred - max(m-1,0))^2)` at tau=0 | All modes |
-| `L_bc` | `mean((v_pred - BS(m_boundary))^2)` at m_min, m_max | All modes |
-| `L_data` | `mean((v_pred - v_hat_market)^2)` on training options | Hybrid + Stage 2 |
-| `L_reg` | C-Vol: `mean((mu-1)^2)` / A-Vol: smoothness penalties | Stage 2 only |
+| `L_pde` | `mean(R²)` over collocation points | All modes |
+| `L_tc` | `mean((v_pred - max(m-1, 0))²)` at τ=0 | All modes |
+| `L_bc` | `mean((v_pred - BS(m_boundary))²)` at m_min, m_max | All modes |
+| `L_data` | `mean((v_pred - v_hat_market)²)` on training options | Hybrid + Stage 2 |
+| `L_reg` | C-Vol: `mean((μ-1)²)`; A-Vol: smoothness penalties | Stage 2 only |
 
-### Grad-Norm Adaptive Balancing
+### Grad-norm adaptive balancing
 
-The total loss is `L = sum(lambda_i * L_i)` where the weights `lambda_i` are adapted every 1000 epochs using Wang et al. Algorithm 1:
-
-```         
-lambda_hat_i = sum(grad_norms) / grad_norm_i
-lambda_new_i = alpha * lambda_old_i + (1-alpha) * lambda_hat_i
+Total loss is `L = Σ λ_i · L_i` where weights `λ_i` are adapted every 1000 epochs (Wang et al. Algorithm 1):
 ```
-
-This prevents any single loss term from dominating gradient updates. Safety floor of 10 on TC/BC weights prevents boundary condition collapse.
+λ̂_i = sum(grad_norms) / grad_norm_i
+λ_new_i = α · λ_old_i + (1-α) · λ̂_i
+```
+Safety floor of 10 on `L_tc` and `L_bc` weights prevents boundary collapse. Pricing and vol gradients are clipped **separately** so a large pricing-grad update doesn't crush the vol-grad signal.
 
 ------------------------------------------------------------------------
 
-## Training Differences by Stage
+## Training pipeline by stage
 
 ### Stage 0: Development (`run_stage0.py`)
 
-Single fixed train/test split (Nov 2020 cutoff). For rapid iteration.
-
-``` python
-model, history, run_info = run_training(
-    ..., mode="physics",   # or "hybrid"
-    arch="modified",       # PricingNet
-    epochs=15000,
-    lr=1e-3,
-)
-```
-
-**Data flow:**
-
-```         
-Full CSV ──> load_and_preprocess ──> make_temporal_split (Nov 2020)
-  ──> compute_constants ──> build_boundary_terminal
-  ──> run_training(sigma=scalar, mode="physics" or "hybrid")
-  ──> validate vs BS + market ──> plots + checkpoint
-```
+Single fixed train/test split. For rapid iteration during architecture development.
 
 ### Stage 1: Walk-Forward Benchmarking (`run_walk_forward.py`)
 
-Same `run_training` call, but looped over 9 folds. Each fold recomputes constants.
+The benchmark table — all 8 configs run the same `run_training` per fold:
 
-``` python
-for fold in FOLDS:
-    train_df, test_df = make_fold(df, fold["train_end"], ...)
-    config = compute_constants(train_df)       # fresh sigma_fixed per fold
-    boundary_data = build_boundary_terminal(config, ...)
-    model, history, run_info = run_training(
-        ..., mode=args.mode, arch=args.arch,   # same function
-    )
-    torch.save({"model_state_dict": ...}, f"fold_{fold['name']}.pt")
-```
-
-The 6 PINN configurations (2x2 ablation grid + mu sweep):
-
-| Config | Arch | Mode | Purpose |
-|----|----|----|----|
-| B0 | Standard | Physics | Naive baseline (no data, no arch improvements) |
-| B1 | Standard | Hybrid | \+ data term (does adding market data help naive arch?) |
-| B2 | Modified | Physics | \+ arch improvements (does better arch help?) |
-| B3 | Modified | Hybrid, mu=0.5 | Full system, mu sweep |
-| B4 | Modified | Hybrid, mu=0.75 | Full system, mu sweep |
-| B5 | Modified | Hybrid, mu=1.0 | Full system, mu sweep |
-
-**Data flow is identical to Stage 0** except `make_fold` replaces `make_temporal_split`, and results aggregate into a pooled RMSE across all folds.
+| Config | Arch | Mode | μ | Purpose |
+|----|----|----|----|----|
+| **B0** | Standard | Physics | — | Naive baseline (no data, no arch improvements) |
+| **B1** | Standard | Hybrid | — | + market data (does adding data help naive arch?) |
+| **B2** | Modified | Physics | 0.50 | + arch improvements |
+| **B3** | Modified | Physics | 0.75 | μ sweep (physics) |
+| **B4** | Modified | Physics | 1.00 | μ sweep (physics) |
+| **B5** | Modified | Hybrid | 0.50 | μ sweep (hybrid) |
+| **B6** | Modified | Hybrid | 0.75 | μ sweep (hybrid) — **default Stage 2 warm-start** |
+| **B7** | Modified | Hybrid | 1.00 | μ sweep (hybrid) |
 
 ### Stage 2: Learnable Volatility (`run_stage2.py`)
 
-Same `run_training` function, but with additional kwargs that activate the vol net code path:
+Same `run_training` function, with additional kwargs that activate the vol net code path:
 
-``` python
+```python
 vol_model = CVolWrapper(VolatilityNet(), sigma_0=config["sigma_fixed"])
 
 model, history, run_info = run_training(
     ...,
-    mode="hybrid",                          # always hybrid in Stage 2
-    # ── Stage 2 additions (all default to None in Stage 0/1) ──
-    vol_model=vol_model,                    # the vol surface network
-    vol_type="cvol",                        # selects regularization type
-    pricing_lr=1e-4,                        # fine-tune (already converged)
-    vol_lr=1e-3,                            # learning from scratch
-    checkpoint_path="runs/.../fold_X.pt",   # warm-start pricing net
+    mode="hybrid",
+    val_arrays=val_arrays,                  # drives val-best snapshot
+    # ── Stage 2 additions ──
+    vol_model=vol_model,
+    vol_type="cvol",
+    pricing_lr=1e-4,                        # pricing fine-tunes
+    vol_lr=1e-3,                            # vol learns from scratch
+    checkpoint_path="runs/walk_forward/.../fold_X.pt",   # warm-start
 )
 ```
 
-**What changes inside `run_training` when `vol_model` is not None:**
+What changes when `vol_model` is not None:
 
 | Component | Stage 0/1 | Stage 2 |
 |----|----|----|
-| Pricing net init | Random | Loaded from Stage 1 checkpoint |
-| Vol net | Does not exist | Fresh, bias-initialized to sigma_fixed |
-| Optimizer | Adam(pricing_params, lr) | Adam([{pricing, 1e-4}, {vol, 1e-3}]) |
-| PDE sigma | Scalar `sigma_fixed` | `vol_model(m, tau)` -- graph-connected |
+| Pricing net init | Random | Loaded from Stage 1 fold checkpoint (warm-start) |
+| Vol net | Doesn't exist | Fresh, bias-init to `sigma_fixed` |
+| Optimizer | Adam(pricing, lr) | Adam([{pricing, 1e-4}, {vol, 1e-3}]) |
+| LR schedule | Cosine 100x decay | Cosine 100x decay per group (LambdaLR) |
+| PDE σ² | Scalar `sigma_fixed²` | `vol_model.get_sigma_squared(m, τ)` |
 | Loss terms | pde, tc, bc [, data] | pde, tc, bc, data, **reg** |
-| Grad norms | pricing params only | pricing + vol params |
-| Grad clipping | pricing params only | pricing + vol params |
-| BS comparison | RMSE vs analytical BS | NaN (meaningless with learned sigma) |
-| Selection key | rmse_bs_norm (physics) / rmse_mkt (hybrid) | rmse_mkt (always) |
-| Checkpoint saves | model_state_dict | model_state_dict + vol_model_state_dict |
-| Diagnostics | Solution surface, scatter | \+ vol surface contours, smile/term slices |
+| Grad clipping | Pricing only | Pricing AND vol — separately |
+| BS comparison | RMSE vs analytical BS | NaN (meaningless with learned σ) |
+| Selection metric | rmse_bs_norm (physics) / rmse_mkt (hybrid) | rmse_mkt (always) |
 
-**Stage 2 data flow:**
+**Why warm-start is safe under val-best**: Stage 1 fold f's checkpoint was trained on `train_window` only (val held out). Stage 2 fold f then warm-starts from that checkpoint and uses the same `val_window` — which the warm-start has never seen. So val is genuinely held-out for Stage 2 too.
 
-```         
-Stage 1 checkpoint (fold_X.pt)
-    │
-    ▼
-Load pricing net weights (warm-start)
-Construct fresh VolatilityNet + CVolWrapper (bias init: mu=1)
-    │
-    ▼
-Training loop:
-    │
-    ├── Collocation batch (m, tau) ──> PDE residual uses vol_model(m,tau) as sigma
-    │                                   Gradients flow: L_pde ──> pricing_net AND vol_net
-    │
-    ├── BC/TC ──> Still use sigma_fixed (boundaries are weakly sigma-dependent)
-    │
-    ├── Market data batch ──> L_data = MSE(v_pred, v_market)  (pricing net only)
-    │
-    ├── Regularization ──> C-Vol: L_reg = mean((mu-1)^2)  (vol net only)
-    │                       A-Vol: L_smooth = smoothness penalties on sigma_hat
-    │
-    └── Grad-norm balancing over all 5 loss terms
-        Differential LR: pricing @ 1e-4, vol @ 1e-3
-```
+Pass `--from_scratch` to `run_stage2.py` to skip warm-start (joint pricing+vol from random init); this is an ablation, not the default.
 
 ------------------------------------------------------------------------
 
@@ -375,61 +308,66 @@ Training loop:
 
 | Boundary | Value | Stage 2 handling |
 |----|----|----|
-| Terminal (tau -\> 0) | `max(m - 1, 0)` (call payoff) | Unchanged -- sigma-independent |
-| Lower (m = m_min) | `BS(m_min, tau, r, sigma_fixed)` | Keep sigma_fixed -- deep OTM, low vega |
-| Upper (m = m_max) | `BS(m_max, tau, r, sigma_fixed)` | Keep sigma_fixed -- deep ITM, intrinsic dominates |
-| Interior | PDE residual | **Uses vol_model sigma** -- this is what we're learning |
+| Terminal (τ → 0) | `max(m - 1, 0)` (call payoff) | Unchanged — σ-independent |
+| Lower (m = m_min) | `BS(m_min, τ, r, sigma_fixed)` | Keep `sigma_fixed` (deep OTM, low vega) |
+| Upper (m = m_max) | `BS(m_max, τ, r, sigma_fixed)` | Keep `sigma_fixed` (deep ITM, intrinsic) |
+| Interior | PDE residual | Uses `vol_model` σ² — this is what we're learning |
 
-The BCs intentionally use constant sigma_fixed even in Stage 2. At the domain boundaries (m=0.65, m=1.35), vega is low, so the sigma mismatch causes negligible BC error. The constant-sigma BCs also act as a stabilizing anchor during early training when the vol net is still learning.
+The BCs intentionally use constant `sigma_fixed` even in Stage 2. At the domain boundaries, vega is low so the σ mismatch causes negligible BC error. The constant-σ BCs also act as a stabilizing anchor during early training.
 
 ------------------------------------------------------------------------
 
-## Running the Code
+## Running the code
 
 ### Environment
 
-``` bash
+```bash
 conda activate pinn_env   # PyTorch, numpy, pandas, scipy, matplotlib
 ```
 
 ### Stage 0 (quick development run)
 
-``` bash
+```bash
 python run_stage0.py --mode physics --epochs 15000 --rwf_mu 0.75
-python run_stage0.py --mode hybrid --epochs 15000 --rwf_mu 0.75
+python run_stage0.py --mode hybrid  --epochs 15000 --rwf_mu 0.75
 ```
 
-### BS Baseline
+### BS baseline (~10 sec, no GPU)
 
-``` bash
-python run_bs_baseline.py
-# Output: pooled RMSE across 9 folds (~$8.79)
+```bash
+bash scripts/run_local_baselines.sh
+# Output: results/bs_baseline/results.json
 ```
 
-### Stage 1 Walk-Forward (full benchmarking)
+### Stage 1 walk-forward (single config locally)
 
-``` bash
-# B0: Standard physics       (~3 hrs)
-python run_walk_forward.py --mode physics --epochs 12000 --arch standard
+```bash
+# B6 example: modified hybrid μ=0.75 — used as Stage 2 warm-start
+python run_walk_forward.py --mode hybrid --arch modified --rwf_mu 0.75 --epochs 15000
 
-# B1: Standard hybrid        (~3 hrs)
-python run_walk_forward.py --mode hybrid --epochs 12000 --arch standard
-
-# B2: Modified physics        (~3 hrs)
-python run_walk_forward.py --mode physics --epochs 15000 --arch modified --rwf_mu 1.0
-
-# B5: Modified hybrid mu=1.0  (~3 hrs)
-python run_walk_forward.py --mode hybrid --epochs 15000 --arch modified --rwf_mu 1.0
-
-# Single-fold smoke test:
-python run_walk_forward.py --mode hybrid --epochs 2000 --folds Nov2020
+# Single-fold smoke test
+python run_walk_forward.py --mode hybrid --arch modified --rwf_mu 0.75 \
+    --epochs 1500 --folds Nov2020 --output_dir runs/_smoke
 ```
 
-### Stage 2 (learnable volatility)
+### Stage 1 on DCC (all 8 configs in parallel)
+
+```bash
+# From your local clone, push first:
+git push origin main
+
+# On DCC:
+ssh ds555@dcc-login.oit.duke.edu
+cd /hpc/group/fisherlab/ds555/pinn_code
+git pull
+bash slurm/submit_all.sh   # smoke → B0-B7 array (8 tasks, ~3-4h each)
+```
+
+### Stage 2 (learnable volatility) — locally
 
 Requires Stage 1 checkpoints:
 
-``` bash
+```bash
 python run_stage2.py --vol_type cvol \
     --checkpoint_dir runs/walk_forward/modified_hybrid_mu0.75 \
     --pricing_lr 1e-4 --vol_lr 1e-3 \
@@ -439,16 +377,50 @@ python run_stage2.py --vol_type avol \
     --checkpoint_dir runs/walk_forward/modified_hybrid_mu0.75 \
     --pricing_lr 1e-4 --vol_lr 1e-3 \
     --epochs 10000 --rwf_mu 0.75
+
+# Optional ablation: train pricing+vol jointly from random init
+python run_stage2.py --vol_type cvol --from_scratch \
+    --pricing_lr 1e-3 --vol_lr 1e-3 --epochs 15000
+```
+
+### Stage 2 on DCC
+
+After B0–B7 finishes and you've picked a μ:
+
+```bash
+# Edit STAGE1_MU in slurm/run_stage2.sh and run_stage2_smoke.sh
+# Then:
+bash slurm/submit_stage2.sh
+```
+
+### Build report artifacts
+
+After all benchmarks finish:
+
+```bash
+# 1. Pull together the master table (CSV + Markdown + per-fold CSV)
+python scripts/build_master_table.py
+
+# 2. Generate report figures (pooled comparison, per-fold lines, stratified, etc.)
+python scripts/make_report_plots.py
+
+# Outputs land in reports/  (master_table.csv, master_table_short.md, figures/*.png)
 ```
 
 ------------------------------------------------------------------------
 
 ## Key Design Decisions
 
-**Backward compatibility via kwargs.** All Stage 2 additions use `default=None` kwargs in `src/` functions. When `vol_model=None`, the code path is identical to Stage 0/1. No separate copies of files, no `if stage == 2` branches scattered around -- the Stage 2 behavior activates only when the caller passes a vol_model.
+**Backward compatibility via kwargs.** All Stage 2 additions use `default=None` kwargs in `src/training.py`. When `vol_model=None`, the code path is identical to Stage 0/1. Stage 2 behavior activates only when the caller passes a vol_model.
 
-**Final-epoch reporting.** The benchmark table uses the final-epoch model, not the best-epoch model. The best-epoch metric is tracked as a stability diagnostic only (the "drift gap" = final - best tells us if the model degraded late in training). This avoids implicit early stopping and makes results more reproducible.
+**Val-best snapshot, single test eval.** During training, the model is snapshotted whenever val RMSE improves. After the loop, the val-best snapshot is restored, and `test_arrays` is evaluated exactly once. This gives bulletproof reporting — no chance of selection bias on the test set, and no per-epoch test-set leakage.
 
-**Pooled RMSE as headline metric.** `sqrt(sum_of_squared_errors / total_n_test)` across all folds, rather than the mean of per-fold RMSEs. This weights every option equally regardless of fold size. Mean-of-folds is reported alongside for stability assessment.
+**Pooled RMSE as headline metric.** `sqrt(Σ ssq / Σ n_test)` across folds, weighted by fold size. Mean-of-folds reported alongside for stability.
 
-**Constant sigma for BCs in Stage 2.** Dynamic BCs (recomputing BC targets with the vol net's sigma each step) create a chicken-and-egg instability. The vol net affects the BCs which affect the loss which affects the vol net. Constant-sigma BCs are stable and approximately correct at the boundaries where vega is low.
+**Per-group gradient clipping.** Pricing and vol gradients are clipped independently. A single combined `clip_grad_norm_` would let pricing's larger gradients suppress the vol signal entirely.
+
+**Per-group cosine LR schedule with same decay ratio.** `LambdaLR` with a multiplicative cosine factor decays each group's base LR by the same 100x ratio (rather than the asymmetric decay you'd get from a single scalar `eta_min`).
+
+**Warm-start as compute optimization, not methodology.** Stage 2 warm-starts pricing from Stage 1 to save ~3x compute, but the val window is never seen by either stage so warm-start is statistically clean. `--from_scratch` flag exists for ablation.
+
+**Constant σ for BCs in Stage 2.** Dynamic BCs (recomputing BC targets every step from the vol net) create a chicken-and-egg instability and don't help much because vega is low at the domain boundaries.

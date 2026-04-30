@@ -1,0 +1,80 @@
+{
+  "folds": [
+    {
+      "fold": "Nov2020",
+      "n_train_a": 41842,
+      "n_val": 5968,
+      "n_train_b": 47810,
+      "n_test": 6420,
+      "sigma_fixed_a": 0.7763340000000001,
+      "sigma_fixed_b": 0.771868,
+      "e_star": 1500,
+      "e_star_raw": 1500,
+      "e_star_capped": false,
+      "phase_a_best_val_metric": 0.7325677275657654,
+      "rmse_bs_norm": 0.4439164996147156,
+      "rmse_mkt": 253.03799475825218,
+      "mae_mkt": 138.14369158878506,
+      "rmse_spread": 729.2424166082808,
+      "rmse_otm": 299.852013098628,
+      "rmse_atm": 187.4089162144523,
+      "rmse_itm": 161.7609929648826,
+      "n_otm": 3656,
+      "n_atm": 1119,
+      "n_itm": 1645,
+      "sum_sq_err_mkt": 411061216.0,
+      "sum_abs_err_mkt": 886882.5,
+      "sum_sq_err_spread": 3414120704.0,
+      "sum_sq_err_otm": 328715456.0,
+      "sum_sq_err_atm": 39301632.0,
+      "sum_sq_err_itm": 43044088.0,
+      "arb_butterfly_ratio": 0.5071875,
+      "arb_calendar_ratio": 0.4859375,
+      "arb_butterfly_max_neg": -18139.109375,
+      "arb_calendar_max_neg": -32.5881233215332,
+      "phase_a_elapsed": 115.25840830802917,
+      "phase_b_elapsed": 112.2995970249176,
+      "elapsed": 227.55800533294678,
+      "fallback_single_phase": false,
+      "phase_a_val_epoch": [
+        1000,
+        1500
+      ],
+      "phase_a_val_rmse_mkt": [
+        403.7397032609948,
+        362.2321030979243
+      ],
+      "phase_b_val_epoch": [
+        1000,
+        1500
+      ],
+      "phase_b_test_rmse_mkt": [
+        296.98635021131525,
+        253.03799475825218
+      ]
+    }
+  ],
+  "summary": {
+    "pooled_rmse_mkt": 253.03799475825218,
+    "pooled_mae_mkt": 138.14369158878506,
+    "pooled_rmse_spread": 729.2424166082808,
+    "pooled_rmse_otm": 299.852013098628,
+    "pooled_rmse_atm": 187.4089162144523,
+    "pooled_rmse_itm": 161.7609929648826,
+    "mean_rmse_mkt": 253.03799475825218,
+    "std_rmse_mkt": 0.0,
+    "worst_rmse_mkt": 253.03799475825218,
+    "worst_fold": "Nov2020",
+    "e_star_mean": 1500.0,
+    "e_star_std": 0.0,
+    "e_star_min": 1500,
+    "e_star_max": 1500,
+    "mean_arb_butterfly_ratio": 0.5071875,
+    "mean_arb_calendar_ratio": 0.4859375,
+    "total_n_test": 6420,
+    "n_folds": 1,
+    "val_months": 1,
+    "phase_a_epochs": 1500,
+    "e_star_floor": 500
+  }
+}

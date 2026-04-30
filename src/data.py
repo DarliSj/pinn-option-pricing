@@ -89,25 +89,51 @@ def make_temporal_split(df, split_date="2020-11-01"):
     return train_df, test_df
 
 
-def make_fold(df, train_end, test_start, test_end, train_start=None):
+def make_fold(df, train_end, test_start, test_end, val_months=1, train_start=None):
     """
-    Create a single walk-forward fold.
+    Create a single walk-forward fold with a held-out validation window.
+
+    The validation window is carved as the LAST `val_months` months of the
+    training window (i.e. the most recent slice of train). This gives an
+    out-of-sample-yet-pre-test set for honest best-epoch model selection
+    without contaminating the test set.
 
     Args:
         df: Full preprocessed DataFrame
         train_end: Last date in training window (exclusive)
         test_start: First date in test window (inclusive)
         test_end: Last date in test window (exclusive)
-        train_start: First date in training window (inclusive), or None for expanding window
+        val_months: Number of months at the tail of train to use as validation
+            (default 1). Set to 0 to disable val (val_df returned empty).
+        train_start: First date in training window (inclusive), or None for
+            expanding window.
+
+    Returns:
+        (train_df, val_df, test_df) — three disjoint frames, all copies.
     """
+    train_end_ts = pd.Timestamp(train_end)
+    test_start_ts = pd.Timestamp(test_start)
+    test_end_ts = pd.Timestamp(test_end)
+
+    # Full training window
     if train_start is not None:
-        train_mask = (df["date"] >= pd.Timestamp(train_start)) & (df["date"] < pd.Timestamp(train_end))
+        full_train_mask = ((df["date"] >= pd.Timestamp(train_start)) &
+                           (df["date"] < train_end_ts))
     else:
-        train_mask = df["date"] < pd.Timestamp(train_end)
+        full_train_mask = df["date"] < train_end_ts
 
-    test_mask = (df["date"] >= pd.Timestamp(test_start)) & (df["date"] < pd.Timestamp(test_end))
+    # Validation = last `val_months` months of train
+    if val_months > 0:
+        val_start_ts = train_end_ts - pd.DateOffset(months=val_months)
+        val_mask = full_train_mask & (df["date"] >= val_start_ts)
+        train_mask = full_train_mask & (df["date"] < val_start_ts)
+    else:
+        val_mask = pd.Series(False, index=df.index)
+        train_mask = full_train_mask
 
-    return df[train_mask].copy(), df[test_mask].copy()
+    test_mask = ((df["date"] >= test_start_ts) & (df["date"] < test_end_ts))
+
+    return df[train_mask].copy(), df[val_mask].copy(), df[test_mask].copy()
 
 
 def compute_constants(train_df, atm_band=(0.95, 1.05)):
@@ -134,7 +160,14 @@ def compute_constants(train_df, atm_band=(0.95, 1.05)):
 
 
 def df_to_arrays(frame):
-    """Extract the columns the PINN needs from a DataFrame."""
+    """Extract the columns the PINN needs from a DataFrame.
+
+    `spread` is the raw bid-ask spread (best_offer - best_bid) in dollars.
+    Used downstream for spread-normalized RMSE, where the residual is
+    expressed in units of the half-spread:
+        z_i = (mid_pred_i - mid_obs_i) / (spread_i / 2)
+    """
+    spread = (frame["best_offer"] - frame["best_bid"]).values.astype(np.float32)
     return {
         "m":       frame["moneyness"].values.astype(np.float32),
         "tau":     frame["time_to_exp"].values.astype(np.float32),
@@ -142,6 +175,7 @@ def df_to_arrays(frame):
         "vhat_bs": frame["v_hat_bs"].values.astype(np.float32),
         "mid":     frame["mid_price"].values.astype(np.float32),
         "K":       frame["strike_price"].values.astype(np.float32),
+        "spread":  spread,
     }
 
 

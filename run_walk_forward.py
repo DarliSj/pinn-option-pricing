@@ -12,13 +12,13 @@ Usage:
 import argparse
 import json
 import torch
-import pandas as pd
 import numpy as np
 from pathlib import Path
 
 from src.data import (load_and_preprocess, make_fold, compute_constants,
                       df_to_arrays, build_boundary_terminal)
 from src.training import run_training
+from src.diagnostics import compute_arbitrage_ratios
 
 
 # ── Walk-forward fold definitions ───────────────────────────────────
@@ -53,6 +53,11 @@ def main():
                         help="Comma-separated subset of fold names to run "
                              "(e.g. 'Nov2020' for a single-fold smoke test). "
                              "Default: all 9 folds.")
+    parser.add_argument("--val_months", type=int, default=1,
+                        help="Months of training tail held out as the "
+                             "validation window (val = month immediately "
+                             "before test). Used to drive val-best "
+                             "snapshot selection; never part of training.")
     args = parser.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -90,30 +95,36 @@ def main():
         print(f"  Train: start → {fold['train_end']}  |  Test: {fold['test_start']} → {fold['test_end']}")
         print(f"{'='*60}")
 
-        # Build fold data
-        train_df, test_df = make_fold(
+        # Build fold data — train / val / test
+        train_df, val_df, test_df = make_fold(
             df, train_end=fold["train_end"],
-            test_start=fold["test_start"], test_end=fold["test_end"]
+            test_start=fold["test_start"], test_end=fold["test_end"],
+            val_months=args.val_months,
         )
 
         if len(test_df) == 0:
             print(f"  WARNING: No test data for {fold['name']}, skipping")
             continue
 
+        # Train: model never sees val or test. Val drives val-best
+        # snapshot; test is evaluated ONCE after restore (inside run_training).
         config = compute_constants(train_df)
         train_arrays = df_to_arrays(train_df)
-        test_arrays = df_to_arrays(test_df)
+        test_arrays  = df_to_arrays(test_df)
+        val_arrays   = df_to_arrays(val_df) if len(val_df) > 0 else None
         boundary_data = build_boundary_terminal(
             config, config["sigma_fixed"], config["r_fixed"]
         )
 
-        print(f"  Train: {len(train_df):,}  Test: {len(test_df):,}")
+        print(f"  Train: {len(train_df):,}  Val: {len(val_df):,}  Test: {len(test_df):,}")
         print(f"  σ_fixed: {config['sigma_fixed']:.4f}")
+        if val_arrays is None and args.val_months > 0:
+            print(f"  WARNING: val_months={args.val_months} requested but val window is empty")
 
-        # Train
         model, history, run_info = run_training(
             train_arrays=train_arrays,
             test_arrays=test_arrays,
+            val_arrays=val_arrays,
             boundary_data=boundary_data,
             config=config,
             mode=args.mode,
@@ -125,43 +136,66 @@ def main():
             device=device,
             verbose=True,
             log_every=2000,
-            val_every=1000,
+            val_every=500,
         )
 
-        # Record results — final-epoch metrics enter the table; best/drift
-        # are stability diagnostics only. sum_sq_err_mkt and sum_abs_err_mkt
-        # are kept per-fold so the summary can compute a pooled RMSE/MAE
-        # (the headline metric in BENCHMARKING_PLAN.md §C1).
+        # Model is now restored to val-best (or final-epoch if val=None).
+        # No-arbitrage diagnostic on the reported model.
+        arb = compute_arbitrage_ratios(model, config, device)
+
         fold_result = {
             "fold": fold["name"],
             "n_train": len(train_df),
-            "n_test": len(test_df),
+            "n_val":   len(val_df),
+            "n_test":  len(test_df),
             "sigma_fixed": config["sigma_fixed"],
+            # Selection / reporting
+            "used_val":         run_info["used_val"],
+            "restored_to_best": run_info["restored_to_best"],
+            "best_val_epoch":   run_info["best_val_epoch"],
+            "best_val_metric":  run_info["best_val_metric"],
+            # Reported test metrics (val-best snapshot, single eval)
             "rmse_bs_norm": run_info["final_rmse_bs_norm"],
-            "rmse_mkt": run_info["final_rmse_mkt"],
-            "mae_mkt": run_info["final_mae_mkt"],
-            "sum_sq_err_mkt":  run_info["final_sum_sq_err_mkt"],
-            "sum_abs_err_mkt": run_info["final_sum_abs_err_mkt"],
-            "best_epoch": run_info["best_epoch"],
-            "best_rmse_bs_norm": run_info["best_rmse_bs_norm"],
-            "best_rmse_mkt": run_info["best_rmse_mkt"],
-            "drift_gap": run_info["drift_gap"],
+            "rmse_mkt":     run_info["final_rmse_mkt"],
+            "mae_mkt":      run_info["final_mae_mkt"],
+            "rmse_spread":  run_info["final_rmse_spread"],
+            "rmse_otm":     run_info["final_rmse_otm"],
+            "rmse_atm":     run_info["final_rmse_atm"],
+            "rmse_itm":     run_info["final_rmse_itm"],
+            "n_otm":        run_info["n_otm"],
+            "n_atm":        run_info["n_atm"],
+            "n_itm":        run_info["n_itm"],
+            # Pooling ingredients
+            "sum_sq_err_mkt":    run_info["final_sum_sq_err_mkt"],
+            "sum_abs_err_mkt":   run_info["final_sum_abs_err_mkt"],
+            "sum_sq_err_spread": run_info["final_sum_sq_err_spread"],
+            "sum_sq_err_otm":    run_info["final_sum_sq_err_otm"],
+            "sum_sq_err_atm":    run_info["final_sum_sq_err_atm"],
+            "sum_sq_err_itm":    run_info["final_sum_sq_err_itm"],
+            # Arbitrage diagnostic
+            "arb_butterfly_ratio":   arb["butterfly_ratio"],
+            "arb_calendar_ratio":    arb["calendar_ratio"],
+            "arb_butterfly_max_neg": arb["butterfly_max_neg"],
+            "arb_calendar_max_neg":  arb["calendar_max_neg"],
             "elapsed": run_info["elapsed_seconds"],
-            # Validation trajectory — for drift/convergence inspection
-            "val_epoch":         [int(x)   for x in history["val_epoch"]],
-            "val_rmse_mkt":      [float(x) for x in history["rmse_mkt"]],
-            "val_rmse_bs_norm":  [float(x) for x in history["rmse_bs_norm"]],
+            # Val curve trajectory (for diagnostic plotting)
+            "val_epoch":        [int(x)   for x in history["val_epoch"]],
+            "val_rmse_mkt":     [float(x) for x in history["val_rmse_mkt"]],
+            "val_rmse_bs_norm": [float(x) for x in history["val_rmse_bs_norm"]],
         }
         results.append(fold_result)
 
-        # Save fold checkpoint
+        # Save fold checkpoint — this IS the val-best snapshot (the
+        # model has already been restored). Stage 2 warm-starts from here.
         torch.save({
             "model_state_dict": model.state_dict(),
             "config": config,
             "run_info": run_info,
         }, output_dir / f"fold_{fold['name']}.pt")
 
-        print(f"  → RMSE vs Market: ${run_info['final_rmse_mkt']:.2f}")
+        ep = run_info["best_val_epoch"] or run_info["epochs"]
+        print(f"  → REPORTED test RMSE vs Market: ${run_info['final_rmse_mkt']:.2f} "
+              f"(val-best epoch: {ep})")
 
     # ── Summary table ───────────────────────────────────────────────
     print(f"\n\n{'='*86}")
@@ -169,59 +203,90 @@ def main():
         print(f"WALK-FORWARD RESULTS: arch={args.arch}, mode={args.mode}, μ={args.rwf_mu}")
     else:
         print(f"WALK-FORWARD RESULTS: arch={args.arch}, mode={args.mode}")
-    print(f"  Reporting final-epoch RMSE; best/drift columns are stability diagnostics only")
-    print(f"{'='*86}")
-    print(f"{'Fold':<10} | {'σ_fix':>6} | {'final($)':>9} | {'best($)':>8} | "
-          f"{'best@ep':>7} | {'drift':>7} | {'time(s)':>7}")
-    print("-" * 86)
+    if results and results[0]["used_val"]:
+        print(f"  Single-phase val-best reporting (val held out, test eval'd once on snapshot)")
+    else:
+        print(f"  Single-phase final-epoch reporting (no val window)")
+    print(f"{'='*100}")
+    print(f"{'Fold':<10} | {'σ_fix':>6} | {'E*':>6} | {'rep($)':>7} | "
+          f"{'spread':>6} | {'OTM/ATM/ITM':>16} | {'arb%':>6} | {'time':>6}")
+    print("-" * 100)
 
     rmses = []
     maes = []
-    drifts = []
+    e_stars = []
     for r in results:
-        best_str = f"{r['best_rmse_mkt']:.2f}" if r['best_rmse_mkt'] is not None else "—"
+        strat = f"{r['rmse_otm']:.2f}/{r['rmse_atm']:.2f}/{r['rmse_itm']:.2f}"
+        arb_pct = 100.0 * (r['arb_butterfly_ratio'] + r['arb_calendar_ratio'])
+        e_star = r["best_val_epoch"] if r["best_val_epoch"] is not None else 0
         print(f"{r['fold']:<10} | {r['sigma_fixed']:>6.3f} | "
-              f"{r['rmse_mkt']:>9.2f} | {best_str:>8} | "
-              f"{r['best_epoch']:>7d} | {r['drift_gap']:>+7.2f} | "
-              f"{r['elapsed']:>7.0f}")
+              f"{e_star:>6d} | {r['rmse_mkt']:>7.2f} | "
+              f"{r['rmse_spread']:>6.2f} | {strat:>16} | "
+              f"{arb_pct:>5.1f}% | {r['elapsed']:>6.0f}")
         rmses.append(r["rmse_mkt"])
         maes.append(r["mae_mkt"])
-        drifts.append(r["drift_gap"])
+        if r["best_val_epoch"] is not None:
+            e_stars.append(r["best_val_epoch"])
 
-    print("-" * 86)
+    print("-" * 100)
 
-    # Pooled = single RMSE over all concatenated residuals across folds.
-    # This is the headline metric per BENCHMARKING_PLAN.md "Reporting Protocol".
-    total_sse = sum(r["sum_sq_err_mkt"] for r in results)
-    total_sae = sum(r["sum_abs_err_mkt"] for r in results)
-    total_n   = sum(r["n_test"]         for r in results)
-    pooled_rmse = float((total_sse / total_n) ** 0.5)
-    pooled_mae  = float(total_sae / total_n)
+    # Pooled metrics — single RMSE over all concatenated residuals across folds.
+    # Headline metric per BENCHMARKING_PLAN.md "Reporting Protocol".
+    total_sse        = sum(r["sum_sq_err_mkt"]    for r in results)
+    total_sae        = sum(r["sum_abs_err_mkt"]   for r in results)
+    total_sse_spread = sum(r["sum_sq_err_spread"] for r in results)
+    total_sse_otm    = sum(r["sum_sq_err_otm"]    for r in results)
+    total_sse_atm    = sum(r["sum_sq_err_atm"]    for r in results)
+    total_sse_itm    = sum(r["sum_sq_err_itm"]    for r in results)
+    total_n          = sum(r["n_test"]            for r in results)
+    total_n_otm      = sum(r["n_otm"]             for r in results)
+    total_n_atm      = sum(r["n_atm"]             for r in results)
+    total_n_itm      = sum(r["n_itm"]             for r in results)
+
+    pooled_rmse        = float((total_sse / total_n) ** 0.5)
+    pooled_mae         = float(total_sae / total_n)
+    pooled_rmse_spread = float((total_sse_spread / total_n) ** 0.5) if total_sse_spread == total_sse_spread else float("nan")
+    pooled_rmse_otm    = float((total_sse_otm / total_n_otm) ** 0.5) if total_n_otm > 0 else float("nan")
+    pooled_rmse_atm    = float((total_sse_atm / total_n_atm) ** 0.5) if total_n_atm > 0 else float("nan")
+    pooled_rmse_itm    = float((total_sse_itm / total_n_itm) ** 0.5) if total_n_itm > 0 else float("nan")
     worst_rmse  = float(max(rmses))
     worst_fold  = results[int(np.argmax(rmses))]["fold"]
 
-    print(f"{'Pooled':<10} | {'':>6} | {pooled_rmse:>9.2f} | "
-          f"{'':>8} | {'':>7} | {'':>7} | "
-          f"{sum(r['elapsed'] for r in results):>7.0f}   ← headline")
-    print(f"{'Mean(fold)':<10} | {'':>6} | {np.mean(rmses):>9.2f} | "
-          f"{'':>8} | {'':>7} | {np.mean(drifts):>+7.2f} |")
-    print(f"{'Std(fold)':<10} | {'':>6} | {np.std(rmses):>9.2f} | "
-          f"{'':>8} | {'':>7} | {np.std(drifts):>7.2f} |")
-    print(f"{'Worst':<10} | {'':>6} | {worst_rmse:>9.2f} | "
-          f"{'':>8} | {'':>7} | {'':>7} |    ({worst_fold})")
+    pooled_arb_butterfly = float(np.mean([r["arb_butterfly_ratio"] for r in results]))
+    pooled_arb_calendar  = float(np.mean([r["arb_calendar_ratio"]  for r in results]))
+
+    strat_pool = f"{pooled_rmse_otm:.2f}/{pooled_rmse_atm:.2f}/{pooled_rmse_itm:.2f}"
+    print(f"{'Pooled':<10} | {'':>6} | {'':>6} | {pooled_rmse:>7.2f} | "
+          f"{pooled_rmse_spread:>6.2f} | {strat_pool:>16} | "
+          f"{100*(pooled_arb_butterfly+pooled_arb_calendar):>5.1f}% |   ← headline")
+    e_star_mean = float(np.mean(e_stars)) if e_stars else 0.0
+    e_star_std  = float(np.std(e_stars))  if e_stars else 0.0
+    if e_stars:
+        print(f"{'Mean(fold)':<10} | {'':>6} | {e_star_mean:>6.0f} | "
+              f"{np.mean(rmses):>7.2f} |  E*: mean={e_star_mean:.0f}  std={e_star_std:.0f}  "
+              f"min={min(e_stars)} max={max(e_stars)}")
 
     # Save results — folds list + aggregate summary block.
     summary = {
-        "pooled_rmse_mkt":  pooled_rmse,
-        "pooled_mae_mkt":   pooled_mae,
-        "mean_rmse_mkt":    float(np.mean(rmses)),
-        "std_rmse_mkt":     float(np.std(rmses)),
-        "worst_rmse_mkt":   worst_rmse,
-        "worst_fold":       worst_fold,
-        "mean_drift_gap":   float(np.mean(drifts)),
-        "max_drift_gap":    float(np.max(drifts)) if len(drifts) else 0.0,
-        "total_n_test":     total_n,
-        "n_folds":          len(results),
+        "pooled_rmse_mkt":     pooled_rmse,
+        "pooled_mae_mkt":      pooled_mae,
+        "pooled_rmse_spread":  pooled_rmse_spread,
+        "pooled_rmse_otm":     pooled_rmse_otm,
+        "pooled_rmse_atm":     pooled_rmse_atm,
+        "pooled_rmse_itm":     pooled_rmse_itm,
+        "mean_rmse_mkt":       float(np.mean(rmses)),
+        "std_rmse_mkt":        float(np.std(rmses)),
+        "worst_rmse_mkt":      worst_rmse,
+        "worst_fold":          worst_fold,
+        "e_star_mean":         e_star_mean,
+        "e_star_std":          e_star_std,
+        "e_star_min":          int(min(e_stars)) if e_stars else None,
+        "e_star_max":          int(max(e_stars)) if e_stars else None,
+        "mean_arb_butterfly_ratio": pooled_arb_butterfly,
+        "mean_arb_calendar_ratio":  pooled_arb_calendar,
+        "total_n_test":        total_n,
+        "n_folds":             len(results),
+        "val_months":          args.val_months,
     }
     with open(output_dir / "results.json", "w") as f:
         json.dump({"folds": results, "summary": summary}, f, indent=2)

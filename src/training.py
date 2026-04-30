@@ -57,23 +57,39 @@ def make_batch(train_arrays, boundary_data, config, rng, device,
 
 
 @torch.no_grad()
-def validate(model, test_arrays, sigma, r, device, vol_model=None):
-    """Compute test-set metrics.
+def validate(model, test_arrays, sigma, r, device, vol_model=None,
+             atm_band=(0.97, 1.03), spread_floor=0.05):
+    """Compute eval-set metrics on the supplied arrays.
 
-    Returns RMSE/MAE plus the per-fold sum-of-squared and sum-of-absolute
-    errors needed to compute pooled RMSE/MAE across folds in the walk-
-    forward summary (pooled_rmse = sqrt(Σ sum_sq_err / Σ n_test)).
+    Returns the historical RMSE/MAE block plus three Stage-2-ready add-ons:
 
-    Stage 2: when vol_model is present, rmse_bs_norm is set to NaN because
-    comparing against constant-σ BS is meaningless with a learned σ surface.
+      rmse_spread : sqrt(mean( ((p̂ − p_obs)/(spread/2))² )). Residuals
+                    expressed in units of the half-spread. A vol surface
+                    "inside the spread" everywhere has rmse_spread ≤ 1.
+                    Spreads below `spread_floor` ($) are clipped to that
+                    floor to avoid divide-by-near-zero blowups from stale
+                    quotes.
+
+      rmse_{otm,atm,itm} : RMSE vs market within moneyness bands defined
+                    by `atm_band` (default (0.97, 1.03)). Diagnoses where
+                    the surface is most inaccurate. Bands with zero rows
+                    return NaN.
+
+      sum_sq_err_spread, sum_sq_err_{otm,atm,itm}, n_{otm,atm,itm} :
+                    pooling ingredients so the walk-forward summary can
+                    compute pooled stratified RMSEs across folds.
+
+    Stage 2: when vol_model is present, rmse_bs_norm is NaN (comparing
+    against constant-σ BS is meaningless with a learned σ surface).
     """
     model.eval()
     if vol_model is not None:
         vol_model.eval()
 
-    m_t = torch.tensor(test_arrays["m"]).to(device)
+    m_arr = test_arrays["m"]
+    m_t   = torch.tensor(m_arr).to(device)
     tau_t = torch.tensor(test_arrays["tau"]).to(device)
-    K_t = torch.tensor(test_arrays["K"]).to(device)
+    K_t   = torch.tensor(test_arrays["K"]).to(device)
     mid_t = torch.tensor(test_arrays["mid"]).to(device)
 
     v_pred = model(m_t, tau_t).squeeze()
@@ -88,14 +104,45 @@ def validate(model, test_arrays, sigma, r, device, vol_model=None):
     else:
         rmse_bs = float("nan")
 
-    # vs market (dollar)
+    # vs market (dollar) — pooled
     price_pred = v_pred * K_t
     residuals_mkt = price_pred - mid_t
-    sum_sq_err_mkt = torch.sum(residuals_mkt ** 2).item()
+    sq = residuals_mkt ** 2
+    sum_sq_err_mkt = torch.sum(sq).item()
     sum_abs_err_mkt = torch.sum(torch.abs(residuals_mkt)).item()
     n_test = int(mid_t.numel())
     rmse_mkt = float((sum_sq_err_mkt / n_test) ** 0.5)
     mae_mkt = float(sum_abs_err_mkt / n_test)
+
+    # ── Spread-normalized RMSE ─────────────────────────────────────
+    # z_i = (p̂_i − p_obs,i) / (spread_i / 2). Spread floor avoids
+    # blowups on stale quotes.
+    if "spread" in test_arrays:
+        spread_t = torch.tensor(test_arrays["spread"]).to(device)
+        half_spread = torch.clamp(spread_t * 0.5, min=float(spread_floor))
+        z = residuals_mkt / half_spread
+        sum_sq_err_spread = torch.sum(z ** 2).item()
+        rmse_spread = float((sum_sq_err_spread / n_test) ** 0.5)
+    else:
+        sum_sq_err_spread = float("nan")
+        rmse_spread = float("nan")
+
+    # ── Moneyness-stratified RMSE ──────────────────────────────────
+    lo, hi = atm_band
+    otm_mask = m_t < lo
+    atm_mask = (m_t >= lo) & (m_t <= hi)
+    itm_mask = m_t > hi
+
+    def _strat(mask):
+        n = int(mask.sum().item())
+        if n == 0:
+            return float("nan"), 0.0, 0
+        s = float(torch.sum(sq[mask]).item())
+        return float((s / n) ** 0.5), s, n
+
+    rmse_otm, ssq_otm, n_otm = _strat(otm_mask)
+    rmse_atm, ssq_atm, n_atm = _strat(atm_mask)
+    rmse_itm, ssq_itm, n_itm = _strat(itm_mask)
 
     model.train()
     if vol_model is not None:
@@ -108,7 +155,44 @@ def validate(model, test_arrays, sigma, r, device, vol_model=None):
         "sum_sq_err_mkt":  sum_sq_err_mkt,
         "sum_abs_err_mkt": sum_abs_err_mkt,
         "n_test":          n_test,
+        # Stage 2 add-ons
+        "rmse_spread":         rmse_spread,
+        "sum_sq_err_spread":   sum_sq_err_spread,
+        "rmse_otm":            rmse_otm,
+        "rmse_atm":            rmse_atm,
+        "rmse_itm":            rmse_itm,
+        "sum_sq_err_otm":      ssq_otm,
+        "sum_sq_err_atm":      ssq_atm,
+        "sum_sq_err_itm":      ssq_itm,
+        "n_otm":               n_otm,
+        "n_atm":               n_atm,
+        "n_itm":               n_itm,
     }
+
+
+
+
+def _snapshot_state(model, vol_model=None):
+    """Deep-clone state_dict tensors onto CPU for cheap val-best storage."""
+    snap = {"model": {k: v.detach().cpu().clone()
+                      for k, v in model.state_dict().items()}}
+    if vol_model is not None:
+        snap["vol_model"] = {k: v.detach().cpu().clone()
+                             for k, v in vol_model.state_dict().items()}
+    return snap
+
+
+def _restore_state(snap, model, vol_model=None, device=None):
+    """Restore model (and vol_model) from a snapshot dict."""
+    state = snap["model"]
+    if device is not None:
+        state = {k: v.to(device) for k, v in state.items()}
+    model.load_state_dict(state)
+    if vol_model is not None and "vol_model" in snap:
+        v_state = snap["vol_model"]
+        if device is not None:
+            v_state = {k: v.to(device) for k, v in v_state.items()}
+        vol_model.load_state_dict(v_state)
 
 
 def run_training(train_arrays, test_arrays, boundary_data, config,
@@ -118,11 +202,12 @@ def run_training(train_arrays, test_arrays, boundary_data, config,
                  rwf_mu=1.0, rwf_sigma=0.1,
                  n_colloc_batch=5000, n_market_batch=8000,
                  grad_norm_freq=1000, grad_norm_alpha=0.9,
-                 log_every=500, val_every=1000,
+                 log_every=500, val_every=500,
                  seed=42, device=None, verbose=True,
                  vol_model=None, vol_type=None,
                  pricing_lr=None, vol_lr=None,
-                 checkpoint_path=None):
+                 checkpoint_path=None,
+                 val_arrays=None):
     """
     Full training pipeline. Returns model, history, run_info.
 
@@ -147,11 +232,25 @@ def run_training(train_arrays, test_arrays, boundary_data, config,
             When None, falls back to `lr`.
         checkpoint_path: Path to a Stage 1 .pt checkpoint for warm-starting
             the pricing net. The vol net is NOT loaded from checkpoint.
+        val_arrays: Held-out validation set (dict from df_to_arrays).
+            When supplied, the model is snapshotted whenever val rmse
+            improves; after the loop the val-best snapshot is restored
+            and test_arrays is evaluated ONCE on the restored model.
+            That single eval populates the `final_*` fields in run_info
+            — those are the official reported numbers. test_arrays is
+            NEVER touched during the training loop.
+
+            When None: no snapshotting; final-epoch metrics are reported
+            (legacy single-phase behaviour, used by Stage 0).
 
     Returns:
-        model: Trained model (final-epoch state, NOT restored to best)
-        history: dict with per-epoch loss/weight/validation records
-        run_info: dict with final-epoch metrics + best/drift diagnostics
+        model: After training, restored to the val-best state (if val
+            supplied) or final-epoch state (if not).
+        history: dict with per-epoch loss/weight records plus val_epoch
+            (eval cadence) and val_rmse_mkt/val_rmse_bs_norm (val curve).
+            No test curve is recorded during training.
+        run_info: dict with reported test metrics (post-restore) and
+            best_val_epoch.
     """
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -193,17 +292,31 @@ def run_training(train_arrays, test_arrays, boundary_data, config,
         vol_model = vol_model.to(device)
 
     # ── Optimizer (differential LR for Stage 2) ────────────────────
+    pricing_lr_eff = pricing_lr if pricing_lr is not None else lr
+    vol_lr_eff     = vol_lr     if vol_lr     is not None else lr
     if vol_model is not None:
         optimizer = torch.optim.Adam([
-            {"params": model.parameters(), "lr": pricing_lr or lr},
-            {"params": vol_model.parameters(), "lr": vol_lr or lr},
+            {"params": model.parameters(),     "lr": pricing_lr_eff},
+            {"params": vol_model.parameters(), "lr": vol_lr_eff},
         ])
     else:
         optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, T_max=epochs, eta_min=lr * 0.01
-    )
+    # Cosine annealing with PER-GROUP eta_min. Stock CosineAnnealingLR
+    # only accepts a scalar eta_min, which makes the floor asymmetric
+    # across groups with different base LRs (e.g. vol_lr=1e-3 and
+    # pricing_lr=1e-4 with eta_min=1e-6 → vol decays 1000x while pricing
+    # only 100x). Using LambdaLR with a multiplicative factor instead:
+    # each group decays to base_lr * 0.01 (uniform 100x ratio).
+    floor_ratio = 0.01
+    def _cosine_factor(epoch):
+        # epoch is 0-indexed by LambdaLR's contract
+        if epoch >= epochs:
+            return floor_ratio
+        return floor_ratio + (1.0 - floor_ratio) * 0.5 * (
+            1.0 + np.cos(np.pi * epoch / epochs)
+        )
+    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=_cosine_factor)
 
     sigma = config["sigma_fixed"]
     r = config["r_fixed"]
@@ -217,21 +330,24 @@ def run_training(train_arrays, test_arrays, boundary_data, config,
     adaptive_weights = {name: 1.0 for name in loss_names}
 
     # ── History tracking ────────────────────────────────────────────
+    # Only val curves are recorded. Test is NEVER touched in the loop —
+    # it is evaluated exactly once after training, on the val-best
+    # snapshot (or final-epoch model when val isn't supplied).
     history = {"epoch": [], "L_total": []}
     for name in loss_names:
         history[f"L_{name}"] = []
         history[f"w_{name}"] = []
-    history["rmse_bs_norm"] = []
-    history["rmse_mkt"] = []
     history["val_epoch"] = []
+    history["val_rmse_mkt"] = []
+    history["val_rmse_bs_norm"] = []
 
-    # Stability diagnostics only — best is NEVER restored. The reported
-    # benchmark number is the final-epoch metric. The best/final gap
-    # quantifies late-training drift (gap ≈ 0 means stable; large gap
-    # means the model peaked early and degraded).
-    best_val = float("inf")
-    best_epoch = 0
-    best_metrics = None
+    # Best-val tracking + snapshot. When val_arrays is supplied, we
+    # snapshot the model whenever val rmse improves and restore that
+    # snapshot before the final test eval.
+    best_val_metric = float("inf")
+    best_val_epoch  = 0
+    best_state      = None
+    use_val = val_arrays is not None
     rng_train = np.random.default_rng(seed)
 
     if verbose:
@@ -245,7 +361,7 @@ def run_training(train_arrays, test_arrays, boundary_data, config,
         if vol_model is not None:
             n_vol_params = sum(p.numel() for p in vol_model.parameters())
             print(f"  Vol net params:     {n_vol_params:,} ({vol_type})")
-            print(f"  Pricing LR: {pricing_lr or lr:.1e}  |  Vol LR: {vol_lr or lr:.1e}")
+            print(f"  Pricing LR: {pricing_lr_eff:.1e}  |  Vol LR: {vol_lr_eff:.1e}")
         print(f"  Loss terms: {loss_names}")
         print("=" * 70)
 
@@ -280,13 +396,16 @@ def run_training(train_arrays, test_arrays, boundary_data, config,
             for name in individual_losses
         )
 
-        # Backward + step
+        # Backward + step. Clip pricing and vol gradients SEPARATELY so
+        # one network's large gradients don't crush the other's signal.
+        # (clip_grad_norm_ over a combined param list scales every group
+        # by the same factor; if pricing |g|=100 and vol |g|=1, vol gets
+        # multiplied by ~0.01 and effectively can't learn.)
         optimizer.zero_grad()
         loss_total.backward()
-        all_params = list(model.parameters())
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         if vol_model is not None:
-            all_params += list(vol_model.parameters())
-        torch.nn.utils.clip_grad_norm_(all_params, max_norm=1.0)
+            torch.nn.utils.clip_grad_norm_(vol_model.parameters(), max_norm=1.0)
         optimizer.step()
         scheduler.step()
 
@@ -308,51 +427,66 @@ def run_training(train_arrays, test_arrays, boundary_data, config,
             history[f"L_{name}"].append(individual_losses[name].item())
             history[f"w_{name}"].append(adaptive_weights[name])
 
-        # Validation
-        if epoch % val_every == 0 or epoch == epochs:
-            metrics = validate(model, test_arrays, sigma, r, device,
-                               vol_model=vol_model)
-            history["val_epoch"].append(epoch)
-            history["rmse_bs_norm"].append(metrics["rmse_bs_norm"])
-            history["rmse_mkt"].append(metrics["rmse_mkt"])
-
-            # Stage 2: rmse_bs_norm is NaN → always use rmse_mkt
+        # Validation — val only, NEVER test
+        if (epoch % val_every == 0 or epoch == epochs) and use_val:
+            # Selection metric: rmse_mkt for hybrid + Stage 2 (the metric
+            # that actually matters for benchmarking); rmse_bs_norm only
+            # makes sense for pure physics with constant σ.
             key = "rmse_mkt" if vol_model is not None else (
                 "rmse_bs_norm" if mode == "physics" else "rmse_mkt"
             )
-            val = metrics[key]
+
+            val_metrics = validate(model, val_arrays, sigma, r, device,
+                                   vol_model=vol_model)
+            history["val_epoch"].append(epoch)
+            history["val_rmse_mkt"].append(val_metrics["rmse_mkt"])
+            history["val_rmse_bs_norm"].append(val_metrics["rmse_bs_norm"])
+
+            sel_metric = val_metrics[key]
+            improved = sel_metric < best_val_metric
+            if improved:
+                best_val_metric = sel_metric
+                best_val_epoch  = epoch
+                best_state = _snapshot_state(model, vol_model)
 
             if verbose:
-                print(f"  [VAL] RMSE vs BS (norm): {metrics['rmse_bs_norm']:.6f} "
-                      f"| RMSE vs Market ($): {metrics['rmse_mkt']:.2f} "
-                      f"| MAE vs Market ($): {metrics['mae_mkt']:.2f}")
-
-            # Track best as a diagnostic — model state is NOT snapshotted
-            # or restored. Reporting policy is final-epoch only.
-            if val < best_val:
-                best_val = val
-                best_epoch = epoch
-                best_metrics = dict(metrics)
-                if verbose:
-                    print(f"  ** New best {key}: {val:.6f} (diagnostic only)")
+                tag = " ★" if improved else ""
+                print(f"  [VAL] ep {epoch:5d}  val RMSE($): {val_metrics['rmse_mkt']:.4f}  "
+                      f"| spread: {val_metrics['rmse_spread']:.3f}  "
+                      f"| OTM/ATM/ITM: "
+                      f"{val_metrics['rmse_otm']:.3f}/"
+                      f"{val_metrics['rmse_atm']:.3f}/"
+                      f"{val_metrics['rmse_itm']:.3f}{tag}")
 
     elapsed = time.time() - t0
 
-    if verbose:
-        print(f"\nTraining complete in {elapsed:.1f}s")
-        print(f"Reporting final-epoch state (best {key}={best_val:.6f} "
-              f"@ ep {best_epoch} kept as stability diagnostic only)")
-
-    # ── Collect run info ────────────────────────────────────────────
-    # final_*: evaluated on the unmodified final-epoch model — these are
-    # the numbers that go into the benchmark table. best_*: stability
-    # diagnostic only, NOT used for model selection.
-    final_metrics = validate(model, test_arrays, sigma, r, device,
-                             vol_model=vol_model)
     selection_key = "rmse_mkt" if vol_model is not None else (
         "rmse_bs_norm" if mode == "physics" else "rmse_mkt"
     )
-    drift_gap = final_metrics[selection_key] - best_val if best_metrics is not None else 0.0
+
+    # ── Restore val-best snapshot (when val was supplied) ──────────────
+    restored_to_best = False
+    if use_val and best_state is not None:
+        _restore_state(best_state, model, vol_model, device=device)
+        restored_to_best = True
+        if verbose:
+            print(f"\nRestored model to val-best epoch {best_val_epoch} "
+                  f"(val {selection_key}={best_val_metric:.6f})")
+
+    # ── Single test eval — touch test_arrays exactly once, here ────────
+    final_test = validate(model, test_arrays, sigma, r, device,
+                          vol_model=vol_model)
+
+    if verbose:
+        print(f"\nTraining complete in {elapsed:.1f}s")
+        report_provenance = ("val-best" if restored_to_best else "final-epoch")
+        print(f"REPORTED ({report_provenance}) test RMSE($): "
+              f"{final_test['rmse_mkt']:.4f}  "
+              f"| spread: {final_test['rmse_spread']:.3f}  "
+              f"| OTM/ATM/ITM: "
+              f"{final_test['rmse_otm']:.3f}/"
+              f"{final_test['rmse_atm']:.3f}/"
+              f"{final_test['rmse_itm']:.3f}")
 
     run_info = {
         "mode": mode,
@@ -368,21 +502,31 @@ def run_training(train_arrays, test_arrays, boundary_data, config,
         "pricing_lr": pricing_lr,
         "vol_lr": vol_lr,
         "checkpoint_source": str(checkpoint_path) if checkpoint_path else None,
-        # Reporting metrics (final epoch — what enters the benchmark table)
-        "final_rmse_bs_norm": final_metrics["rmse_bs_norm"],
-        "final_rmse_mkt": final_metrics["rmse_mkt"],
-        "final_mae_mkt": final_metrics["mae_mkt"],
-        # Pooling ingredients (per-fold sum-of-errors so the walk-forward
-        # summary can compute pooled RMSE = sqrt(Σ sum_sq / Σ n_test)).
-        "final_sum_sq_err_mkt":  final_metrics["sum_sq_err_mkt"],
-        "final_sum_abs_err_mkt": final_metrics["sum_abs_err_mkt"],
-        "n_test":                final_metrics["n_test"],
-        # Stability diagnostics only (not for selection)
-        "selection_key": selection_key,
-        "best_epoch": best_epoch,
-        "best_rmse_bs_norm": best_metrics["rmse_bs_norm"] if best_metrics else None,
-        "best_rmse_mkt": best_metrics["rmse_mkt"] if best_metrics else None,
-        "drift_gap": drift_gap,
+        # ── Selection / reporting policy ───────────────────────────────
+        "selection_key":     selection_key,
+        "used_val":          use_val,
+        "restored_to_best":  restored_to_best,
+        "best_val_epoch":    best_val_epoch if use_val else None,
+        "best_val_metric":   best_val_metric if use_val else None,
+        # ── Reported test metrics (val-best snapshot, single eval) ─────
+        "final_rmse_bs_norm": final_test["rmse_bs_norm"],
+        "final_rmse_mkt":     final_test["rmse_mkt"],
+        "final_mae_mkt":      final_test["mae_mkt"],
+        "final_rmse_spread":  final_test["rmse_spread"],
+        "final_rmse_otm":     final_test["rmse_otm"],
+        "final_rmse_atm":     final_test["rmse_atm"],
+        "final_rmse_itm":     final_test["rmse_itm"],
+        "n_otm": final_test["n_otm"],
+        "n_atm": final_test["n_atm"],
+        "n_itm": final_test["n_itm"],
+        # Pooling ingredients across folds (pooled RMSE = sqrt(Σ ssq / Σ n))
+        "final_sum_sq_err_mkt":    final_test["sum_sq_err_mkt"],
+        "final_sum_abs_err_mkt":   final_test["sum_abs_err_mkt"],
+        "final_sum_sq_err_spread": final_test["sum_sq_err_spread"],
+        "final_sum_sq_err_otm":    final_test["sum_sq_err_otm"],
+        "final_sum_sq_err_atm":    final_test["sum_sq_err_atm"],
+        "final_sum_sq_err_itm":    final_test["sum_sq_err_itm"],
+        "n_test":                  final_test["n_test"],
         "adaptive_weights": adaptive_weights,
         "config": config,
     }

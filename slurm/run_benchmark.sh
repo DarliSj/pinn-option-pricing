@@ -1,21 +1,23 @@
 #!/bin/bash
 # ============================================================
 # PINN Walk-Forward Benchmark — SLURM Job Array
-# Runs B2–B7: modified MLP + RWF, all mu × mode combos
+# Runs B0–B7: all arch × mode × μ combinations.
 #
 # Submit with:
-#   sbatch --array=0-5 slurm/run_benchmark.sh
+#   sbatch --array=0-7 slurm/run_benchmark.sh
 #
 # Or a single config for testing:
-#   sbatch --array=2 slurm/run_benchmark.sh
+#   sbatch --array=4 slurm/run_benchmark.sh
 #
 # Task → config mapping:
-#   0: modified physics mu=0.50   (B2)
-#   1: modified physics mu=0.75   (B3)
-#   2: modified physics mu=1.00   (B4)
-#   3: modified hybrid  mu=0.50   (B5)
-#   4: modified hybrid  mu=0.75   (B6)
-#   5: modified hybrid  mu=1.00   (B7)
+#   0: standard physics             (B0)  naive baseline
+#   1: standard hybrid              (B1)  naive + market data
+#   2: modified physics  μ=0.50     (B2)
+#   3: modified physics  μ=0.75     (B3)
+#   4: modified physics  μ=1.00     (B4)
+#   5: modified hybrid   μ=0.50     (B5)
+#   6: modified hybrid   μ=0.75     (B6)  ← Stage 2 warm-start default
+#   7: modified hybrid   μ=1.00     (B7)
 # ============================================================
 
 #SBATCH --job-name=pinn_benchmark
@@ -40,22 +42,27 @@ echo "GPU:        $(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/nul
 echo "Date:       $(date)"
 echo "============================================"
 
-# ── Config lookup (task ID → mode + mu) ────────────────────
-MODES=(physics physics physics hybrid hybrid hybrid)
-MUS=(0.5 0.75 1.0 0.5 0.75 1.0)
+# ── Config lookup (task ID → arch + mode + μ) ──────────────
+ARCHS=(standard standard modified modified modified modified modified modified)
+MODES=(physics  hybrid   physics  physics  physics  hybrid   hybrid   hybrid)
+MUS=(   1.0     1.0      0.5      0.75     1.0      0.5      0.75     1.0)
 
+ARCH=${ARCHS[$SLURM_ARRAY_TASK_ID]}
 MODE=${MODES[$SLURM_ARRAY_TASK_ID]}
 MU=${MUS[$SLURM_ARRAY_TASK_ID]}
 
-echo "Config: arch=modified  mode=$MODE  mu=$MU"
+echo "Config: arch=$ARCH  mode=$MODE  μ=$MU (μ ignored when arch=standard)"
 echo "============================================"
 
 # ── Run ────────────────────────────────────────────────────
+# Single training run per fold (val-best snapshot reporting).
+# val_months=1 (default) → val = month immediately before test month.
 python run_walk_forward.py \
-    --arch modified \
+    --arch $ARCH \
     --mode $MODE \
     --rwf_mu $MU \
     --epochs 15000 \
+    --val_months 1 \
     --seed 42 \
     --output_dir runs/walk_forward
 

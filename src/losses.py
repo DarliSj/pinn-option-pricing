@@ -49,14 +49,24 @@ def compute_pde_residual(model, m, tau, sigma, r, vol_model=None):
 
     m_col = m.unsqueeze(1) if m.dim() == 1 else m
 
-    # σ: either learned surface (Stage 2) or constant scalar (Stage 0/1)
+    # σ²: either learned surface (Stage 2) or constant scalar (Stage 0/1).
+    # For Stage 2 we use get_sigma_squared() when available — this avoids
+    # computing sqrt(μ·σ₀²) in vol_model.forward() and then squaring it
+    # back here, which is both wasteful and introduces a sqrt-gradient
+    # singularity as μ → 0 (softplus output isn't bounded away from zero
+    # during training). AVolWrapper has no shortcut so it falls through
+    # to the explicit square.
     if vol_model is not None:
-        sigma_val = vol_model(m, tau)   # (N, 1) tensor — graph connected
+        if hasattr(vol_model, "get_sigma_squared"):
+            sigma_sq = vol_model.get_sigma_squared(m, tau)   # (N, 1)
+        else:
+            sigma_val = vol_model(m, tau)
+            sigma_sq = sigma_val ** 2
     else:
-        sigma_val = sigma               # scalar, backward compat
+        sigma_sq = sigma ** 2           # scalar, backward compat
 
     residual = (dv_dtau
-                - 0.5 * sigma_val**2 * m_col**2 * d2v_dm2
+                - 0.5 * sigma_sq * m_col**2 * d2v_dm2
                 - r * m_col * dv_dm
                 + r * v)
     return residual

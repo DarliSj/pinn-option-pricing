@@ -322,6 +322,94 @@ def plot_vol_slices(vol_model, config, device, sigma_fixed,
     return fig
 
 
+def compute_arbitrage_ratios(model, config, device, vol_model=None,
+                             n_m=80, n_tau=40, eps_m=1e-3, eps_tau=1e-3,
+                             tol=1e-6):
+    """
+    No-arbitrage diagnostic for the learned price surface v̂(m, τ).
+
+    Two static arbitrage tests on a regular (m, τ) grid:
+
+      Butterfly (convexity in strike):
+        For a normalized call v̂(m, τ) = C/K with m = S/K, the no-butterfly
+        condition ∂²C/∂K² ≥ 0 in K-space translates (Stage 0/1 framework
+        with frozen S and varying K through m = S/K) into a test on the
+        (m, v̂) curve. Here we use a robust proxy: the second moneyness
+        derivative ∂²v̂/∂m² should be ≥ 0 because for a vanilla call the
+        normalized price is convex in m. We finite-difference v̂ in m and
+        flag points where d²v̂/dm² < −tol as butterfly violations.
+
+      Calendar (monotonicity in maturity):
+        ∂C/∂T ≥ 0 (a longer-maturity option is worth at least as much as
+        a shorter one, all else equal). In normalized form ∂v̂/∂τ ≥ 0.
+        We finite-difference and flag points where ∂v̂/∂τ < −tol.
+
+    Returns:
+        dict with
+          n_grid                : total grid points evaluated
+          butterfly_violations  : count of grid cells violating convexity
+          butterfly_ratio       : violations / n_grid  (ideal: 0)
+          butterfly_max_neg     : largest negative value of ∂²v̂/∂m²
+          calendar_violations   : count of grid cells violating monotonicity
+          calendar_ratio        : violations / n_grid
+          calendar_max_neg      : largest negative value of ∂v̂/∂τ
+
+    Note: this is a *grid* check, not the training-time PDE residual; it
+    catches whether the learned surface is shape-valid where the network
+    is queried for predictions, regardless of whether the PDE was
+    enforced there during training. `tol` lets minor numerical noise pass.
+    """
+    model.eval()
+    if vol_model is not None:
+        vol_model.eval()
+
+    m_grid = np.linspace(config["m_min"], config["m_max"], n_m).astype(np.float32)
+    tau_grid = np.linspace(max(config["tau_min"], eps_tau),
+                           config["tau_max"], n_tau).astype(np.float32)
+    M_g, TAU_g = np.meshgrid(m_grid, tau_grid)
+    m_flat = M_g.flatten()
+    tau_flat = TAU_g.flatten()
+
+    def _eval(m_arr, tau_arr):
+        with torch.no_grad():
+            v = model(
+                torch.tensor(m_arr).to(device),
+                torch.tensor(tau_arr).to(device),
+            ).squeeze().cpu().numpy()
+        return v.reshape(M_g.shape)
+
+    v_center = _eval(m_flat, tau_flat)
+
+    # ── Butterfly: ∂²v̂/∂m² via central second difference ─────────────
+    v_m_plus  = _eval((m_flat + eps_m).clip(config["m_min"], config["m_max"]), tau_flat)
+    v_m_minus = _eval((m_flat - eps_m).clip(config["m_min"], config["m_max"]), tau_flat)
+    d2v_dm2 = (v_m_plus - 2.0 * v_center + v_m_minus) / (eps_m ** 2)
+
+    butterfly_neg = d2v_dm2 < -tol
+    butterfly_violations = int(butterfly_neg.sum())
+    butterfly_max_neg = float(d2v_dm2.min())  # most-negative value
+
+    # ── Calendar: ∂v̂/∂τ via forward difference ───────────────────────
+    v_tau_plus = _eval(m_flat, (tau_flat + eps_tau).clip(max=config["tau_max"]))
+    dv_dtau = (v_tau_plus - v_center) / eps_tau
+
+    calendar_neg = dv_dtau < -tol
+    calendar_violations = int(calendar_neg.sum())
+    calendar_max_neg = float(dv_dtau.min())
+
+    n_grid = int(M_g.size)
+    return {
+        "n_grid": n_grid,
+        "butterfly_violations": butterfly_violations,
+        "butterfly_ratio": butterfly_violations / n_grid,
+        "butterfly_max_neg": butterfly_max_neg,
+        "calendar_violations": calendar_violations,
+        "calendar_ratio": calendar_violations / n_grid,
+        "calendar_max_neg": calendar_max_neg,
+        "tol": tol,
+    }
+
+
 def print_epoch_summary(history, target_epochs=None):
     """Print diagnostic table at key epochs."""
     if target_epochs is None:

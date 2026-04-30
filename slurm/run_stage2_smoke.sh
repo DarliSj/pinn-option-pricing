@@ -1,10 +1,10 @@
 #!/bin/bash
 # ============================================================
-# Stage 2 smoke test: one fold, 500 epochs, C-Vol only.
+# Stage 2 smoke test: one fold, 1000 epochs, C-Vol only.
 # Verifies the warm-start + vol_model pipeline works before
 # submitting the full Stage 2 array.
 #
-# REQUIRES: Stage 1 B2-B7 must have finished.
+# REQUIRES: Stage 1 B0-B7 must have finished.
 #           Edit STAGE1_MU below to the μ you selected.
 #
 # Submit with:
@@ -37,7 +37,8 @@ python run_stage2.py \
     --rwf_mu $STAGE1_MU \
     --pricing_lr 1e-4 \
     --vol_lr 1e-3 \
-    --epochs 500 \
+    --epochs 1000 \
+    --val_months 1 \
     --folds Nov2020 \
     --output_dir runs/stage2_smoke \
     --no_plots

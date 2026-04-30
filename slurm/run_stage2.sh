@@ -3,7 +3,7 @@
 # Stage 2 Walk-Forward — SLURM Job Array (C-Vol + A-Vol)
 # Warm-starts from Stage 1 checkpoints, trains vol surface.
 #
-# REQUIRES: Stage 1 B2-B7 complete + smoke test passed.
+# REQUIRES: Stage 1 B0-B7 complete + smoke test passed.
 #           Edit STAGE1_MU below to the μ you selected.
 #
 # Submit with:
@@ -44,11 +44,14 @@ echo "============================================"
 VOL_TYPES=(cvol avol)
 VOL_TYPE=${VOL_TYPES[$SLURM_ARRAY_TASK_ID]}
 
-echo "Config: vol_type=$VOL_TYPE  checkpoint=modified_hybrid_mu${STAGE1_MU}"
+echo "Config: vol_type=$VOL_TYPE  warm-start=modified_hybrid_mu${STAGE1_MU}"
 echo "============================================"
 
 # ── Run ────────────────────────────────────────────────────
-# Keeps plots on — vol surface + slices are core diagnostics
+# Single training run per fold (val-best snapshot reporting).
+# Warm-start pricing net is loaded from the Stage 1 checkpoint
+# (which under val-best scheme also doesn't see the val window —
+# so val is genuinely held-out for Stage 2).
 python run_stage2.py \
     --vol_type $VOL_TYPE \
     --checkpoint_dir runs/walk_forward/modified_hybrid_mu${STAGE1_MU} \
@@ -56,6 +59,7 @@ python run_stage2.py \
     --pricing_lr 1e-4 \
     --vol_lr 1e-3 \
     --epochs 10000 \
+    --val_months 1 \
     --seed 42 \
     --output_dir runs/stage2
 
