@@ -200,28 +200,45 @@ def compute_grad_norms(model, losses, extra_params=None):
 
 
 def update_adaptive_weights(current_weights, grad_norms, alpha=0.9,
-                            min_constraint_weight=10.0):
+                            min_constraint_weight=10.0,
+                            excluded_terms=None):
     """
-    Wang et al. Algorithm 1: grad-norm balancing with EMA.
+    Wang et al. Algorithm 1 (Eq 5.3): grad-norm balancing with EMA.
 
     λ̂_i = (Σ_j g_j) / g_i
     λ_new = α·λ_old + (1−α)·λ̂
 
     Includes weight floor on TC/BC as safety net.
+
+    Args:
+        excluded_terms: Optional set/list of loss-term names to KEEP at
+            their current weight (not adapted, not included in the
+            normalization sum). Use this to pin λ_data to a fixed value
+            when running the "decouple data from balancing" ablation
+            (Wang's Algorithm 1 was tested only with PDE+IC+BC, not with
+            an additional supervised data term).
     """
-    total_norm = sum(grad_norms.values())
+    excluded = set(excluded_terms or ())
+    # Sum over the terms that ARE being balanced — Wang's Eq 5.3 enforces
+    # equality between weighted gradient norms among the balanced losses.
+    # Excluded terms (e.g. fixed λ_data) shouldn't enter the sum because
+    # they're not part of the equalization constraint.
+    total_norm = sum(g for n, g in grad_norms.items() if n not in excluded)
     new_weights = {}
 
     for name in current_weights:
+        if name in excluded:
+            new_weights[name] = current_weights[name]   # frozen
+            continue
         if name in grad_norms and grad_norms[name] > 1e-10:
             target = total_norm / grad_norms[name]
         else:
             target = current_weights[name]
         new_weights[name] = alpha * current_weights[name] + (1 - alpha) * target
 
-    # Safety floor on constraint weights
+    # Safety floor on constraint weights (only when adapted)
     for name in ["tc", "bc"]:
-        if name in new_weights:
+        if name in new_weights and name not in excluded:
             new_weights[name] = max(new_weights[name], min_constraint_weight)
 
     return new_weights

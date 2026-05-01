@@ -36,6 +36,10 @@ CONFIG_ORDER = [
     "B5_modified_hybrid_mu0.5",
     "B6_modified_hybrid_mu0.75",
     "B7_modified_hybrid_mu1.0",
+    # Loss-balancing ablations
+    "B8_modified_hybrid_mu0.0",
+    "B9_modified_hybrid_mu0.75_fixdata1000.0",
+    "B10_modified_hybrid_mu0.75_warmup5000",
     "S2_cvol",
     "S2_avol",
     "S2_cvol_scratch",
@@ -95,14 +99,18 @@ def _tag_from_walk_forward_dir(dirname: str) -> str:
         modified_hybrid_mu1.0           → B7_modified_hybrid_mu1.0
     """
     mapping = {
-        "standard_physics":         "B0",
-        "standard_hybrid":          "B1",
-        "modified_physics_mu0.5":   "B2",
-        "modified_physics_mu0.75":  "B3",
-        "modified_physics_mu1.0":   "B4",
-        "modified_hybrid_mu0.5":    "B5",
-        "modified_hybrid_mu0.75":   "B6",
-        "modified_hybrid_mu1.0":    "B7",
+        "standard_physics":                            "B0",
+        "standard_hybrid":                             "B1",
+        "modified_physics_mu0.5":                      "B2",
+        "modified_physics_mu0.75":                     "B3",
+        "modified_physics_mu1.0":                      "B4",
+        "modified_hybrid_mu0.5":                       "B5",
+        "modified_hybrid_mu0.75":                      "B6",
+        "modified_hybrid_mu1.0":                       "B7",
+        # Loss-balancing ablations
+        "modified_hybrid_mu0.0":                       "B8",
+        "modified_hybrid_mu0.75_fixdata1000.0":        "B9",
+        "modified_hybrid_mu0.75_warmup5000":           "B10",
     }
     prefix = mapping.get(dirname, "B?")
     return f"{prefix}_{dirname}"
@@ -229,16 +237,31 @@ def build_per_fold_rows(tag: str, results: dict, is_bs: bool = False):
 
 
 def to_markdown_short(df: pd.DataFrame) -> str:
-    """Slim Markdown table for paper / report inclusion."""
+    """Slim Markdown table for paper / report inclusion.
+
+    Uses a hand-rolled GFM writer (no `tabulate` dependency).
+    """
     cols = ["config", "pooled_rmse", "mean_fold_rmse", "std_fold_rmse",
             "pooled_rmse_otm", "pooled_rmse_atm", "pooled_rmse_itm",
             "pooled_rmse_spread", "arb_butterfly%", "arb_calendar%",
             "e_star_mean"]
     cols = [c for c in cols if c in df.columns]
     sub = df[cols].copy()
-    rounder = {c: 3 for c in sub.select_dtypes(include="number").columns}
-    sub = sub.round(rounder)
-    return sub.to_markdown(index=False)
+
+    def _fmt(v):
+        if v is None or (isinstance(v, float) and (pd.isna(v))):
+            return "—"
+        if isinstance(v, (int, np.integer)):
+            return str(int(v))
+        if isinstance(v, (float, np.floating)):
+            return f"{v:.3f}"
+        return str(v)
+
+    header = "| " + " | ".join(cols) + " |"
+    sep    = "|" + "|".join(["---"] * len(cols)) + "|"
+    rows = ["| " + " | ".join(_fmt(r[c]) for c in cols) + " |"
+            for _, r in sub.iterrows()]
+    return "\n".join([header, sep] + rows)
 
 
 def main():

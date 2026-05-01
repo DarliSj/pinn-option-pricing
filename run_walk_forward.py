@@ -58,6 +58,17 @@ def main():
                              "validation window (val = month immediately "
                              "before test). Used to drive val-best "
                              "snapshot selection; never part of training.")
+    parser.add_argument("--fixed_data_weight", type=float, default=None,
+                        help="Pin λ_data to this value and exclude it from "
+                             "Wang grad-norm balancing. Decouples data "
+                             "fitting from constraint balancing — useful "
+                             "when grad-norm runs away in hybrid+RWF setups. "
+                             "Typical value: 1.0 to 10.0. Default: None "
+                             "(data is balanced like everything else).")
+    parser.add_argument("--data_loss_warmup", type=int, default=0,
+                        help="Number of warmup epochs to train as physics-only "
+                             "before turning on L_data. Lets PDE/TC/BC find "
+                             "a stable basin first. Default: 0 (no warmup).")
     args = parser.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -69,10 +80,16 @@ def main():
     print(f"Full dataset: {len(df):,} obs, {df['date'].min().date()} → {df['date'].max().date()}")
 
     # Output directory naming reflects arch + mode + (μ if applicable)
+    # plus loss-balancing ablation suffixes (so B6 vs B9 vs B10 land in
+    # distinct directories).
     if args.arch == "modified":
         run_tag = f"{args.arch}_{args.mode}_mu{args.rwf_mu}"
     else:
         run_tag = f"{args.arch}_{args.mode}"
+    if args.fixed_data_weight is not None:
+        run_tag += f"_fixdata{args.fixed_data_weight}"
+    if args.data_loss_warmup > 0:
+        run_tag += f"_warmup{args.data_loss_warmup}"
     output_dir = Path(args.output_dir) / run_tag
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -137,6 +154,8 @@ def main():
             verbose=True,
             log_every=2000,
             val_every=500,
+            fixed_data_weight=args.fixed_data_weight,
+            data_loss_warmup=args.data_loss_warmup,
         )
 
         # Model is now restored to val-best (or final-epoch if val=None).

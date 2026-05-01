@@ -10,6 +10,8 @@ The system evolves through three stages, each adding capability while reusing th
 | **1** | Same, walk-forward validated | Constant sigma_fixed | Same, across 9 temporal folds |
 | **2** | Price + volatility surface | Learned sigma(m, tau) | Physics + market + regularization |
 
+**Where to look for results:** `reports/master_table.csv` (one row per config), `reports/master_table_short.md` (paper-ready table), `reports/figures/*.png` (comparison plots), `reports/results_summary.md` (narrative summary + findings + recommendations).
+
 ------------------------------------------------------------------------
 
 ## Project Structure
@@ -40,18 +42,21 @@ The system evolves through three stages, each adding capability while reusing th
 │
 ├── slurm/                                   # SLURM scripts for Duke DCC
 │   ├── run_smoke_test.sh                    # 1-fold smoke test
-│   ├── run_benchmark.sh                     # B0–B7 array (8 configs)
+│   ├── run_benchmark.sh                     # B0–B10 array (11 configs)
 │   ├── run_stage2_smoke.sh                  # Stage 2 smoke test
 │   ├── run_stage2.sh                        # Stage 2 array (cvol + avol)
-│   ├── submit_all.sh                        # Submits smoke → B0–B7 with dependency
+│   ├── submit_all.sh                        # Submits smoke → B0–B10 with dependency
 │   └── submit_stage2.sh                     # Submits Stage 2 smoke → cvol + avol
 │
 ├── runs/                                    # All training output (checkpoints, logs, plots, results.json)
 │   ├── walk_forward/
 │   │   ├── standard_physics/                # B0
 │   │   ├── standard_hybrid/                 # B1
-│   │   ├── modified_physics_mu{0.5,0.75,1.0}/   # B2-B4
-│   │   └── modified_hybrid_mu{0.5,0.75,1.0}/    # B5-B7
+│   │   ├── modified_physics_mu{0.5,0.75,1.0}/        # B2-B4
+│   │   ├── modified_hybrid_mu{0.5,0.75,1.0}/         # B5-B7
+│   │   ├── modified_hybrid_mu0.0/                    # B8 — RWF init fix
+│   │   ├── modified_hybrid_mu0.75_fixdata1000.0/     # B9 — fixed λ_data ablation
+│   │   └── modified_hybrid_mu0.75_warmup5000/        # B10 — physics-warmup ablation
 │   └── stage2/
 │       ├── cvol/                            # C-Vol (multiplicative)
 │       ├── avol/                            # A-Vol (direct softplus)
@@ -188,14 +193,14 @@ RWFLinear(64→1)  →  v_hat(m, tau)
 
 **Why each component matters:**
 - **Fourier features**: maps low-dim (m, τ) into spectral space so MLPs can fit high-frequency PDE solutions.
-- **RWF (Random Weight Factorization)**: `W = diag(exp(s)) · V` gives each neuron an adaptive learning rate. The `mu` parameter controls initial magnitude.
-- **Modified MLP gating**: prevents BC/TC gradient vanishing through the deep `tanh` chain.
+- **RWF (Random Weight Factorization)**: `W = diag(exp(s)) · V`. Gradient on each row gets an `exp(2 s_k)` per-neuron learning-rate factor, which acts as a learned adaptive LR. The `mu` parameter controls *initial* weight magnitude (`Var(W) ∝ exp(2μ)`); the adaptive-LR benefit is present for any μ. Wang recommends μ=1.0 for forward-PDE problems; we use μ=0.0 for hybrid mode (B8) because high μ × high RWF amplification × the data loss term causes runaway adaptive weights — see B5–B7 vs B8 in `reports/results_summary.md`.
+- **Modified MLP gating**: parallel `g = h ⊙ U + (1-h) ⊙ V` paths from the input embedding into every hidden layer. Theoretical motivation is to keep input-coordinate gradients alive through the deep `tanh` chain; in our walk-forward results this benefit does not dominate (a plain MLP — B1 — is competitive).
 
 ~37,700 parameters.
 
 ### StandardPricingNet (Naive Baseline)
 
-Used for B0/B1. Fourier features + plain MLP (no RWF, no gating). ~37,500 parameters. Expected to suffer from BC/TC gradient vanishing.
+Used for B0/B1. Fourier features + plain MLP (no RWF, no gating). ~37,500 parameters. Serves as the naive reference for the Modified MLP comparison.
 
 ### VolatilityNet (Stage 2)
 
@@ -234,12 +239,15 @@ Computed via PyTorch automatic differentiation (requires `tanh` activation for s
 
 ### Grad-norm adaptive balancing
 
-Total loss is `L = Σ λ_i · L_i` where weights `λ_i` are adapted every 1000 epochs (Wang et al. Algorithm 1):
+Total loss is `L = Σ λ_i · L_i`. Weights `λ_i` are adapted every 1000 epochs following Wang et al. Algorithm 1 (Eq 5.3):
 ```
 λ̂_i = sum(grad_norms) / grad_norm_i
 λ_new_i = α · λ_old_i + (1-α) · λ̂_i
 ```
+
 Safety floor of 10 on `L_tc` and `L_bc` weights prevents boundary collapse. Pricing and vol gradients are clipped **separately** so a large pricing-grad update doesn't crush the vol-grad signal.
+
+**Important caveat**: Wang's scheme was tested only on `L_pde + L_ic + L_bc` (no data term). Adding a 4th supervised `L_data` term can drive `λ_data` to runaway values when paired with high RWF μ — see `reports/results_summary.md` and the B8/B9/B10 ablations. `update_adaptive_weights` accepts an `excluded_terms` set so individual loss weights can be pinned out of the balancing scheme (used by B9: `--fixed_data_weight`).
 
 ------------------------------------------------------------------------
 
@@ -251,18 +259,21 @@ Single fixed train/test split. For rapid iteration during architecture developme
 
 ### Stage 1: Walk-Forward Benchmarking (`run_walk_forward.py`)
 
-The benchmark table — all 8 configs run the same `run_training` per fold:
+The benchmark table — 11 configs run the same `run_training` per fold:
 
-| Config | Arch | Mode | μ | Purpose |
-|----|----|----|----|----|
-| **B0** | Standard | Physics | — | Naive baseline (no data, no arch improvements) |
-| **B1** | Standard | Hybrid | — | + market data (does adding data help naive arch?) |
-| **B2** | Modified | Physics | 0.50 | + arch improvements |
-| **B3** | Modified | Physics | 0.75 | μ sweep (physics) |
-| **B4** | Modified | Physics | 1.00 | μ sweep (physics) |
-| **B5** | Modified | Hybrid | 0.50 | μ sweep (hybrid) |
-| **B6** | Modified | Hybrid | 0.75 | μ sweep (hybrid) — **default Stage 2 warm-start** |
-| **B7** | Modified | Hybrid | 1.00 | μ sweep (hybrid) |
+| Config | Arch | Mode | μ | Extra | Purpose |
+|----|----|----|----|----|----|
+| **B0** | Standard | Physics | — | — | Naive baseline (no data, no arch improvements) |
+| **B1** | Standard | Hybrid | — | — | + market data (does adding data help naive arch?) |
+| **B2** | Modified | Physics | 0.50 | — | + arch improvements |
+| **B3** | Modified | Physics | 0.75 | — | μ sweep (physics) |
+| **B4** | Modified | Physics | 1.00 | — | μ sweep (physics) |
+| **B5** | Modified | Hybrid | 0.50 | — | μ sweep (hybrid) |
+| **B6** | Modified | Hybrid | 0.75 | — | μ sweep (hybrid) |
+| **B7** | Modified | Hybrid | 1.00 | — | μ sweep (hybrid) |
+| **B8** | Modified | Hybrid | 0.00 | — | RWF init fix — kills initial gradient blowup |
+| **B9** | Modified | Hybrid | 0.75 | `λ_data=1000` fixed | Fix #2 — decouple data from grad-norm balancing |
+| **B10** | Modified | Hybrid | 0.75 | `warmup=5000` | Fix #5 — pre-train PDE for 5k epochs, then add data |
 
 ### Stage 2: Learnable Volatility (`run_stage2.py`)
 
@@ -342,15 +353,27 @@ bash scripts/run_local_baselines.sh
 ### Stage 1 walk-forward (single config locally)
 
 ```bash
-# B6 example: modified hybrid μ=0.75 — used as Stage 2 warm-start
+# Example: modified hybrid μ=0.75 (one of the eleven configs)
 python run_walk_forward.py --mode hybrid --arch modified --rwf_mu 0.75 --epochs 15000
 
 # Single-fold smoke test
 python run_walk_forward.py --mode hybrid --arch modified --rwf_mu 0.75 \
     --epochs 1500 --folds Nov2020 --output_dir runs/_smoke
+
+# Loss-balancing ablations (B8/B9/B10):
+# B8 — kill RWF init blowup
+python run_walk_forward.py --mode hybrid --arch modified --rwf_mu 0.0 --epochs 15000
+
+# B9 — pin λ_data, decouple from grad-norm
+python run_walk_forward.py --mode hybrid --arch modified --rwf_mu 0.75 \
+    --fixed_data_weight 1000.0 --epochs 15000
+
+# B10 — physics-only warmup, then turn on data
+python run_walk_forward.py --mode hybrid --arch modified --rwf_mu 0.75 \
+    --data_loss_warmup 5000 --epochs 15000
 ```
 
-### Stage 1 on DCC (all 8 configs in parallel)
+### Stage 1 on DCC (all 11 configs in parallel)
 
 ```bash
 # From your local clone, push first:
@@ -360,12 +383,18 @@ git push origin main
 ssh ds555@dcc-login.oit.duke.edu
 cd /hpc/group/fisherlab/ds555/pinn_code
 git pull
-bash slurm/submit_all.sh   # smoke → B0-B7 array (8 tasks, ~3-4h each)
+bash slurm/submit_all.sh   # smoke → B0-B10 array (11 tasks, ~3-4h each)
+
+# Or submit one task at a time, e.g. just B8:
+sbatch --array=8 slurm/run_benchmark.sh
 ```
 
 ### Stage 2 (learnable volatility) — locally
 
-Requires Stage 1 checkpoints:
+Requires Stage 1 checkpoints (warm-start from your best Stage 1 config).
+Pick `--checkpoint_dir` based on `reports/master_table.csv`; example uses
+the originally-planned B6, but in practice the right choice depends on
+which Stage 1 config wins:
 
 ```bash
 python run_stage2.py --vol_type cvol \
@@ -385,10 +414,11 @@ python run_stage2.py --vol_type cvol --from_scratch \
 
 ### Stage 2 on DCC
 
-After B0–B7 finishes and you've picked a μ:
+After Stage 1 finishes and you've picked a winning config:
 
 ```bash
-# Edit STAGE1_MU in slurm/run_stage2.sh and run_stage2_smoke.sh
+# Edit STAGE1_MU (and the warm-start dir name if different from
+# modified_hybrid_muX) in slurm/run_stage2.sh and run_stage2_smoke.sh.
 # Then:
 bash slurm/submit_stage2.sh
 ```
@@ -413,14 +443,8 @@ python scripts/make_report_plots.py
 
 **Backward compatibility via kwargs.** All Stage 2 additions use `default=None` kwargs in `src/training.py`. When `vol_model=None`, the code path is identical to Stage 0/1. Stage 2 behavior activates only when the caller passes a vol_model.
 
-**Val-best snapshot, single test eval.** During training, the model is snapshotted whenever val RMSE improves. After the loop, the val-best snapshot is restored, and `test_arrays` is evaluated exactly once. This gives bulletproof reporting — no chance of selection bias on the test set, and no per-epoch test-set leakage.
-
-**Pooled RMSE as headline metric.** `sqrt(Σ ssq / Σ n_test)` across folds, weighted by fold size. Mean-of-folds reported alongside for stability.
-
 **Per-group gradient clipping.** Pricing and vol gradients are clipped independently. A single combined `clip_grad_norm_` would let pricing's larger gradients suppress the vol signal entirely.
 
-**Per-group cosine LR schedule with same decay ratio.** `LambdaLR` with a multiplicative cosine factor decays each group's base LR by the same 100x ratio (rather than the asymmetric decay you'd get from a single scalar `eta_min`).
+**Per-group cosine LR schedule with same decay ratio.** `LambdaLR` with a multiplicative cosine factor decays each group's base LR by the same 100x ratio (rather than the asymmetric decay from a single scalar `eta_min`).
 
 **Warm-start as compute optimization, not methodology.** Stage 2 warm-starts pricing from Stage 1 to save ~3x compute, but the val window is never seen by either stage so warm-start is statistically clean. `--from_scratch` flag exists for ablation.
-
-**Constant σ for BCs in Stage 2.** Dynamic BCs (recomputing BC targets every step from the vol net) create a chicken-and-egg instability and don't help much because vega is low at the domain boundaries.

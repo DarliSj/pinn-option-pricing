@@ -207,7 +207,10 @@ def run_training(train_arrays, test_arrays, boundary_data, config,
                  vol_model=None, vol_type=None,
                  pricing_lr=None, vol_lr=None,
                  checkpoint_path=None,
-                 val_arrays=None):
+                 val_arrays=None,
+                 track_test_curve=False,
+                 fixed_data_weight=None,
+                 data_loss_warmup=0):
     """
     Full training pipeline. Returns model, history, run_info.
 
@@ -242,6 +245,20 @@ def run_training(train_arrays, test_arrays, boundary_data, config,
 
             When None: no snapshotting; final-epoch metrics are reported
             (legacy single-phase behaviour, used by Stage 0).
+
+        fixed_data_weight: When not None and mode=="hybrid", `λ_data` is
+            pinned to this value and EXCLUDED from grad-norm balancing.
+            Decouples supervised data fitting from the constraint-balancing
+            machinery (Wang Algorithm 1 was only tested on PDE+IC+BC; with
+            a 4th data term + RWF init the balancer can blow `λ_data` up
+            to 10⁵+, swamping training). Typical value: 1.0 to 10.0.
+
+        data_loss_warmup: For epochs ≤ this value, train as if mode=="physics"
+            (no L_data term). After warmup, switch to the requested mode.
+            Lets PDE/TC/BC find a stable basin before adding the noisy data
+            signal. When > 0 and mode=="hybrid", λ_data is initialized to
+            1.0 at warmup-end, then either adapted by grad-norm or held
+            fixed (per `fixed_data_weight`).
 
     Returns:
         model: After training, restored to the val-best state (if val
@@ -322,12 +339,23 @@ def run_training(train_arrays, test_arrays, boundary_data, config,
     r = config["r_fixed"]
 
     # ── Adaptive weights ────────────────────────────────────────────
+    # `loss_names` covers every term that may appear at any point in
+    # training (so history/weights have stable keys). When data_loss_warmup
+    # is in effect, the data term is omitted from the loss dict for
+    # epochs ≤ warmup (handled in the loop below).
     loss_names = ["pde", "tc", "bc"]
     if mode == "hybrid":
         loss_names.append("data")
     if vol_model is not None:
         loss_names.append("reg")
     adaptive_weights = {name: 1.0 for name in loss_names}
+    # Pin λ_data when fixed_data_weight is requested
+    if fixed_data_weight is not None and "data" in adaptive_weights:
+        adaptive_weights["data"] = float(fixed_data_weight)
+    # Names to KEEP at fixed weight (excluded from grad-norm rebalancing)
+    excluded_from_balance = set()
+    if fixed_data_weight is not None and "data" in adaptive_weights:
+        excluded_from_balance.add("data")
 
     # ── History tracking ────────────────────────────────────────────
     # Only val curves are recorded. Test is NEVER touched in the loop —
@@ -340,6 +368,10 @@ def run_training(train_arrays, test_arrays, boundary_data, config,
     history["val_epoch"] = []
     history["val_rmse_mkt"] = []
     history["val_rmse_bs_norm"] = []
+    # Diagnostic only: track test curve in training loop. Off by default
+    # to preserve "test touched exactly once" invariant. ONLY enable for
+    # post-hoc analysis (val-best vs final-epoch comparison).
+    history["test_rmse_mkt_diagnostic"] = []
 
     # Best-val tracking + snapshot. When val_arrays is supplied, we
     # snapshot the model whenever val rmse improves and restore that
@@ -363,11 +395,17 @@ def run_training(train_arrays, test_arrays, boundary_data, config,
             print(f"  Vol net params:     {n_vol_params:,} ({vol_type})")
             print(f"  Pricing LR: {pricing_lr_eff:.1e}  |  Vol LR: {vol_lr_eff:.1e}")
         print(f"  Loss terms: {loss_names}")
+        if fixed_data_weight is not None:
+            print(f"  λ_data PINNED at {fixed_data_weight:.2f} "
+                  f"(excluded from grad-norm balancing)")
+        if data_loss_warmup > 0:
+            print(f"  Data loss WARMUP: epochs 1..{data_loss_warmup} run as physics-only")
         print("=" * 70)
 
     t0 = time.time()
 
     # ── Training loop ───────────────────────────────────────────────
+    in_warmup_prev = data_loss_warmup > 0   # tracks transition out of warmup
     for epoch in range(1, epochs + 1):
         model.train()
         if vol_model is not None:
@@ -376,18 +414,38 @@ def run_training(train_arrays, test_arrays, boundary_data, config,
         batch = make_batch(train_arrays, boundary_data, config, rng_train,
                            device, n_colloc_batch, n_market_batch)
 
+        # Effective mode for this epoch: hold off on data loss during warmup
+        in_warmup = (mode == "hybrid") and (epoch <= data_loss_warmup)
+        mode_now = "physics" if in_warmup else mode
+
+        # Detect warmup→hybrid transition. When data loss switches on,
+        # reset λ_data to 1.0 (or fixed_data_weight) so grad-norm has a
+        # sane starting point — otherwise it stays at the warmup-era value
+        # of 1.0 forever (because update_adaptive_weights skips terms not
+        # in grad_norms).
+        if in_warmup_prev and not in_warmup:
+            adaptive_weights["data"] = (float(fixed_data_weight)
+                                        if fixed_data_weight is not None
+                                        else 1.0)
+            if verbose:
+                print(f"  [warmup→hybrid] data loss activated at ep {epoch}; "
+                      f"λ_data init={adaptive_weights['data']:.2f}")
+        in_warmup_prev = in_warmup
+
         individual_losses = compute_individual_losses(
-            model, batch, sigma, r, mode=mode,
+            model, batch, sigma, r, mode=mode_now,
             vol_model=vol_model, vol_type=vol_type,
         )
 
-        # Grad-norm weight update
+        # Grad-norm weight update (only over terms currently active AND not
+        # excluded by fixed_data_weight)
         if epoch % grad_norm_freq == 0 or epoch == 1:
             extra_params = list(vol_model.parameters()) if vol_model is not None else None
             grad_norms = compute_grad_norms(model, individual_losses,
                                             extra_params=extra_params)
             adaptive_weights = update_adaptive_weights(
-                adaptive_weights, grad_norms, alpha=grad_norm_alpha
+                adaptive_weights, grad_norms, alpha=grad_norm_alpha,
+                excluded_terms=excluded_from_balance,
             )
 
         # Weighted total loss
@@ -409,25 +467,40 @@ def run_training(train_arrays, test_arrays, boundary_data, config,
         optimizer.step()
         scheduler.step()
 
-        # Logging
+        # Logging — skip terms that aren't active this epoch (e.g. data
+        # during warmup)
         if verbose and (epoch % log_every == 0 or epoch == 1):
             lr_now = optimizer.param_groups[0]["lr"]
             parts = [f"Ep {epoch:5d}/{epochs}"]
             parts.append(f"L={loss_total.item():.2e}")
             for name in loss_names:
-                parts.append(f"{name}={individual_losses[name].item():.2e}")
-                parts.append(f"w={adaptive_weights[name]:.2f}")
+                if name in individual_losses:
+                    parts.append(f"{name}={individual_losses[name].item():.2e}")
+                    parts.append(f"w={adaptive_weights[name]:.2f}")
             parts.append(f"lr={lr_now:.1e}")
             print(" | ".join(parts))
 
-        # Record history
+        # Record history. Use NaN as placeholder when a loss term isn't
+        # active for the current epoch (e.g. data during warmup).
         history["epoch"].append(epoch)
         history["L_total"].append(loss_total.item())
         for name in loss_names:
-            history[f"L_{name}"].append(individual_losses[name].item())
-            history[f"w_{name}"].append(adaptive_weights[name])
+            if name in individual_losses:
+                history[f"L_{name}"].append(individual_losses[name].item())
+                history[f"w_{name}"].append(adaptive_weights[name])
+            else:
+                history[f"L_{name}"].append(float("nan"))
+                history[f"w_{name}"].append(adaptive_weights[name])
 
-        # Validation — val only, NEVER test
+        # Diagnostic: track test in training loop (OFF by default).
+        # Used post-hoc to compare val-best vs test-best vs final-epoch.
+        if track_test_curve and (epoch % val_every == 0 or epoch == epochs):
+            with torch.no_grad():
+                t_metrics = validate(model, test_arrays, sigma, r, device,
+                                     vol_model=vol_model)
+                history["test_rmse_mkt_diagnostic"].append(t_metrics["rmse_mkt"])
+
+        # Validation — val only, NEVER test (unless track_test_curve diagnostic)
         if (epoch % val_every == 0 or epoch == epochs) and use_val:
             # Selection metric: rmse_mkt for hybrid + Stage 2 (the metric
             # that actually matters for benchmarking); rmse_bs_norm only
@@ -502,6 +575,9 @@ def run_training(train_arrays, test_arrays, boundary_data, config,
         "pricing_lr": pricing_lr,
         "vol_lr": vol_lr,
         "checkpoint_source": str(checkpoint_path) if checkpoint_path else None,
+        # Loss-balancing ablations (None / 0 means default Wang Algorithm 1)
+        "fixed_data_weight": fixed_data_weight,
+        "data_loss_warmup":  data_loss_warmup,
         # ── Selection / reporting policy ───────────────────────────────
         "selection_key":     selection_key,
         "used_val":          use_val,

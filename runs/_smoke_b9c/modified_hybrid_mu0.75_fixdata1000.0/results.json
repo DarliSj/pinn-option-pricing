@@ -1,0 +1,72 @@
+{
+  "folds": [
+    {
+      "fold": "Nov2020",
+      "n_train": 41842,
+      "n_val": 5968,
+      "n_test": 6420,
+      "sigma_fixed": 0.7763340000000001,
+      "used_val": true,
+      "restored_to_best": true,
+      "best_val_epoch": 1500,
+      "best_val_metric": 9.110421221920406,
+      "rmse_bs_norm": 0.018302829936146736,
+      "rmse_mkt": 12.144657604615016,
+      "mae_mkt": 8.707802156347352,
+      "rmse_spread": 61.36864756067866,
+      "rmse_otm": 12.38930058046399,
+      "rmse_atm": 12.254810430452487,
+      "rmse_itm": 11.503255040194356,
+      "n_otm": 3656,
+      "n_atm": 1119,
+      "n_itm": 1645,
+      "sum_sq_err_mkt": 946903.1875,
+      "sum_abs_err_mkt": 55904.08984375,
+      "sum_sq_err_spread": 24178432.0,
+      "sum_sq_err_otm": 561176.875,
+      "sum_sq_err_atm": 168051.84375,
+      "sum_sq_err_itm": 217674.421875,
+      "arb_butterfly_ratio": 0.4625,
+      "arb_calendar_ratio": 0.4290625,
+      "arb_butterfly_max_neg": -1436.1739501953125,
+      "arb_calendar_max_neg": -5.173489093780518,
+      "elapsed": 143.32682609558105,
+      "val_epoch": [
+        500,
+        1000,
+        1500
+      ],
+      "val_rmse_mkt": [
+        22.149611998005707,
+        12.953088693528384,
+        9.110421221920406
+      ],
+      "val_rmse_bs_norm": [
+        0.04472256079316139,
+        0.026297099888324738,
+        0.01801854372024536
+      ]
+    }
+  ],
+  "summary": {
+    "pooled_rmse_mkt": 12.144657604615016,
+    "pooled_mae_mkt": 8.707802156347352,
+    "pooled_rmse_spread": 61.36864756067866,
+    "pooled_rmse_otm": 12.38930058046399,
+    "pooled_rmse_atm": 12.254810430452487,
+    "pooled_rmse_itm": 11.503255040194356,
+    "mean_rmse_mkt": 12.144657604615016,
+    "std_rmse_mkt": 0.0,
+    "worst_rmse_mkt": 12.144657604615016,
+    "worst_fold": "Nov2020",
+    "e_star_mean": 1500.0,
+    "e_star_std": 0.0,
+    "e_star_min": 1500,
+    "e_star_max": 1500,
+    "mean_arb_butterfly_ratio": 0.4625,
+    "mean_arb_calendar_ratio": 0.4290625,
+    "total_n_test": 6420,
+    "n_folds": 1,
+    "val_months": 1
+  }
+}

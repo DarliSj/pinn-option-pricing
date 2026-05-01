@@ -51,9 +51,13 @@ def short_label(config: str) -> str:
     parts = config.split("_")
     if config.startswith("S2_"):
         return "S2 " + parts[1]
-    # B6_modified_hybrid_mu0.75 → B6 mod-hyb μ=0.75
+    # B0_standard_physics              → B0 std-phy
+    # B1_standard_hybrid               → B1 std-hyb
+    # B6_modified_hybrid_mu0.75        → B6 mod-hyb μ=0.75
     if len(parts) >= 4:
         return f"{parts[0]} {parts[1][:3]}-{parts[2][:3]} μ={parts[3][2:]}"
+    if len(parts) == 3:
+        return f"{parts[0]} {parts[1][:3]}-{parts[2][:3]}"
     return config
 
 

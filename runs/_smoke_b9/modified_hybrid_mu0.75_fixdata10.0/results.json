@@ -1,0 +1,72 @@
+{
+  "folds": [
+    {
+      "fold": "Nov2020",
+      "n_train": 41842,
+      "n_val": 5968,
+      "n_test": 6420,
+      "sigma_fixed": 0.7763340000000001,
+      "used_val": true,
+      "restored_to_best": true,
+      "best_val_epoch": 1500,
+      "best_val_metric": 16.503387036594173,
+      "rmse_bs_norm": 0.032194748520851135,
+      "rmse_mkt": 21.27533307630666,
+      "mae_mkt": 12.153575253115266,
+      "rmse_spread": 63.19603579980289,
+      "rmse_otm": 23.078363139226223,
+      "rmse_atm": 20.09916907258607,
+      "rmse_itm": 17.550145263905783,
+      "n_otm": 3656,
+      "n_atm": 1119,
+      "n_itm": 1645,
+      "sum_sq_err_mkt": 2905947.5,
+      "sum_abs_err_mkt": 78025.953125,
+      "sum_sq_err_spread": 25639804.0,
+      "sum_sq_err_otm": 1947225.25,
+      "sum_sq_err_atm": 452049.8125,
+      "sum_sq_err_itm": 506672.5,
+      "arb_butterfly_ratio": 0.4925,
+      "arb_calendar_ratio": 0.3975,
+      "arb_butterfly_max_neg": -1477.59912109375,
+      "arb_calendar_max_neg": -4.558384418487549,
+      "elapsed": 147.4698429107666,
+      "val_epoch": [
+        500,
+        1000,
+        1500
+      ],
+      "val_rmse_mkt": [
+        72.5222532178658,
+        25.411144175821693,
+        16.503387036594173
+      ],
+      "val_rmse_bs_norm": [
+        0.14733459055423737,
+        0.04973248019814491,
+        0.030459705740213394
+      ]
+    }
+  ],
+  "summary": {
+    "pooled_rmse_mkt": 21.27533307630666,
+    "pooled_mae_mkt": 12.153575253115266,
+    "pooled_rmse_spread": 63.19603579980289,
+    "pooled_rmse_otm": 23.078363139226223,
+    "pooled_rmse_atm": 20.09916907258607,
+    "pooled_rmse_itm": 17.550145263905783,
+    "mean_rmse_mkt": 21.27533307630666,
+    "std_rmse_mkt": 0.0,
+    "worst_rmse_mkt": 21.27533307630666,
+    "worst_fold": "Nov2020",
+    "e_star_mean": 1500.0,
+    "e_star_std": 0.0,
+    "e_star_min": 1500,
+    "e_star_max": 1500,
+    "mean_arb_butterfly_ratio": 0.4925,
+    "mean_arb_calendar_ratio": 0.3975,
+    "total_n_test": 6420,
+    "n_folds": 1,
+    "val_months": 1
+  }
+}
