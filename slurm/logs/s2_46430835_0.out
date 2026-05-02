@@ -1,0 +1,84 @@
+============================================
+Job ID:     46430894
+Array task: 0
+Node:       dcc-core-gpu-ferc-s-h36-6
+GPU:        NVIDIA GeForce RTX 2080 Ti
+Stage 1 dir: modified_hybrid_mu0.75_warmup5000
+Stage 1 μ:   0.75
+Date:        Fri May  1 11:41:13 PM EDT 2026
+============================================
+Config: vol_type=cvol  warm-start=modified_hybrid_mu0.75_warmup5000
+============================================
+Device: cuda
+Loading and preprocessing data...
+Full dataset: 59,668 obs, 2020-01-02 -> 2020-12-31
+
+============================================================
+FOLD 1/9: Apr2020 — Stage 2 (cvol)
+  Train: start -> 2020-04-01  |  Test: 2020-04-01 -> 2020-05-01
+============================================================
+  Train: 12,743  Val: 2,941  Test: 3,094
+  sigma_fixed: 0.6848
+  Loaded warm-start pricing net from runs/walk_forward/modified_hybrid_mu0.75_warmup5000/fold_Apr2020.pt
+Training: mode=hybrid, epochs=10000, lr=0.0001
+  Architecture: Modified MLP + RWF (μ=0.75)
+  Pricing net params: 37,698
+  Vol net params:     5,282 (cvol)
+  Pricing LR: 1.0e-04  |  Vol LR: 1.0e-03
+  Loss terms: ['pde', 'tc', 'bc', 'data', 'reg']
+======================================================================
+Ep     1/10000 | L=1.21e+00 | pde=1.08e+00 | w=1.00 | tc=4.42e-04 | w=78.57 | bc=4.34e-05 | w=427.38 | data=9.47e-04 | w=88.58 | reg=0.00e+00 | w=1.00 | lr=1.0e-04
+  [VAL] ep   250  val RMSE($): 3.0093  | spread: 20.539  | OTM/ATM/ITM: 2.607/3.907/3.846 ★
+  [VAL] ep   500  val RMSE($): 2.8895  | spread: 19.273  | OTM/ATM/ITM: 2.510/3.653/3.792 ★
+  [VAL] ep   750  val RMSE($): 2.8814  | spread: 19.505  | OTM/ATM/ITM: 2.487/3.736/3.728 ★
+  [VAL] ep  1000  val RMSE($): 2.9203  | spread: 20.054  | OTM/ATM/ITM: 2.557/3.717/3.715
+  [VAL] ep  1250  val RMSE($): 2.8600  | spread: 19.255  | OTM/ATM/ITM: 2.532/3.606/3.568 ★
+  [VAL] ep  1500  val RMSE($): 2.8388  | spread: 18.745  | OTM/ATM/ITM: 2.462/3.680/3.625 ★
+  [VAL] ep  1750  val RMSE($): 2.8136  | spread: 18.717  | OTM/ATM/ITM: 2.482/3.542/3.555 ★
+Ep  2000/10000 | L=3.35e-01 | pde=1.50e-01 | w=1.00 | tc=1.06e-06 | w=2019.47 | bc=2.22e-06 | w=2260.81 | data=3.10e-04 | w=453.66 | reg=1.01e-03 | w=36.01 | lr=9.1e-05
+  [VAL] ep  2000  val RMSE($): 2.8467  | spread: 19.116  | OTM/ATM/ITM: 2.462/3.698/3.652
+  [VAL] ep  2250  val RMSE($): 2.8206  | spread: 18.419  | OTM/ATM/ITM: 2.456/3.612/3.620
+  [VAL] ep  2500  val RMSE($): 2.8089  | spread: 18.516  | OTM/ATM/ITM: 2.461/3.585/3.555 ★
+  [VAL] ep  2750  val RMSE($): 2.8106  | spread: 18.449  | OTM/ATM/ITM: 2.465/3.574/3.567
+  [VAL] ep  3000  val RMSE($): 2.8014  | spread: 18.167  | OTM/ATM/ITM: 2.427/3.618/3.606 ★
+  [VAL] ep  3250  val RMSE($): 2.8344  | spread: 18.336  | OTM/ATM/ITM: 2.486/3.618/3.578
+  [VAL] ep  3500  val RMSE($): 2.8360  | spread: 18.358  | OTM/ATM/ITM: 2.492/3.591/3.598
+  [VAL] ep  3750  val RMSE($): 2.8259  | spread: 18.202  | OTM/ATM/ITM: 2.470/3.608/3.604
+Ep  4000/10000 | L=3.49e-01 | pde=1.11e-01 | w=1.00 | tc=3.04e-07 | w=6738.17 | bc=8.55e-07 | w=4192.01 | data=2.68e-04 | w=865.42 | reg=2.57e-07 | w=2258.86 | lr=6.6e-05
+  [VAL] ep  4000  val RMSE($): 2.8325  | spread: 18.238  | OTM/ATM/ITM: 2.506/3.558/3.557
+  [VAL] ep  4250  val RMSE($): 2.8430  | spread: 18.003  | OTM/ATM/ITM: 2.488/3.631/3.608
+  [VAL] ep  4500  val RMSE($): 2.8483  | spread: 18.274  | OTM/ATM/ITM: 2.492/3.633/3.622
+  [VAL] ep  4750  val RMSE($): 2.8483  | spread: 18.094  | OTM/ATM/ITM: 2.518/3.598/3.557
+  [VAL] ep  5000  val RMSE($): 2.8119  | spread: 17.904  | OTM/ATM/ITM: 2.465/3.574/3.576
+  [VAL] ep  5250  val RMSE($): 2.8051  | spread: 17.677  | OTM/ATM/ITM: 2.452/3.569/3.591
+  [VAL] ep  5500  val RMSE($): 2.8053  | spread: 17.542  | OTM/ATM/ITM: 2.458/3.547/3.594
+  [VAL] ep  5750  val RMSE($): 2.8608  | spread: 17.990  | OTM/ATM/ITM: 2.499/3.651/3.654
+Ep  6000/10000 | L=4.09e-01 | pde=1.06e-01 | w=1.00 | tc=2.06e-07 | w=8100.41 | bc=4.38e-07 | w=6079.23 | data=2.55e-04 | w=1171.01 | reg=1.85e-08 | w=14041.28 | lr=3.5e-05
+  [VAL] ep  6000  val RMSE($): 2.8108  | spread: 17.579  | OTM/ATM/ITM: 2.460/3.559/3.605
+  [VAL] ep  6250  val RMSE($): 2.8496  | spread: 17.872  | OTM/ATM/ITM: 2.493/3.621/3.642
+  [VAL] ep  6500  val RMSE($): 2.8153  | spread: 17.643  | OTM/ATM/ITM: 2.456/3.593/3.608
+  [VAL] ep  6750  val RMSE($): 2.8226  | spread: 17.797  | OTM/ATM/ITM: 2.472/3.585/3.603
+  [VAL] ep  7000  val RMSE($): 2.8231  | spread: 17.688  | OTM/ATM/ITM: 2.472/3.582/3.607
+  [VAL] ep  7250  val RMSE($): 2.8346  | spread: 17.740  | OTM/ATM/ITM: 2.482/3.597/3.621
+  [VAL] ep  7500  val RMSE($): 2.8317  | spread: 17.722  | OTM/ATM/ITM: 2.474/3.606/3.627
+  [VAL] ep  7750  val RMSE($): 2.8328  | spread: 17.669  | OTM/ATM/ITM: 2.483/3.597/3.608
+Ep  8000/10000 | L=4.23e-01 | pde=9.22e-02 | w=1.00 | tc=1.19e-07 | w=11904.75 | bc=3.24e-07 | w=7087.43 | data=2.50e-04 | w=1310.17 | reg=1.60e-09 | w=43531.04 | lr=1.0e-05
+  [VAL] ep  8000  val RMSE($): 2.8231  | spread: 17.651  | OTM/ATM/ITM: 2.470/3.590/3.605
+  [VAL] ep  8250  val RMSE($): 2.8253  | spread: 17.630  | OTM/ATM/ITM: 2.479/3.579/3.597
+  [VAL] ep  8500  val RMSE($): 2.8183  | spread: 17.548  | OTM/ATM/ITM: 2.466/3.580/3.603
+  [VAL] ep  8750  val RMSE($): 2.8403  | spread: 17.715  | OTM/ATM/ITM: 2.483/3.618/3.628
+  [VAL] ep  9000  val RMSE($): 2.8313  | spread: 17.636  | OTM/ATM/ITM: 2.475/3.603/3.623
+  [VAL] ep  9250  val RMSE($): 2.8274  | spread: 17.620  | OTM/ATM/ITM: 2.478/3.584/3.609
+  [VAL] ep  9500  val RMSE($): 2.8251  | spread: 17.620  | OTM/ATM/ITM: 2.473/3.588/3.609
+  [VAL] ep  9750  val RMSE($): 2.8290  | spread: 17.635  | OTM/ATM/ITM: 2.476/3.595/3.613
+Ep 10000/10000 | L=4.40e-01 | pde=8.54e-02 | w=1.00 | tc=9.51e-08 | w=20186.70 | bc=2.47e-07 | w=7780.33 | data=2.54e-04 | w=1384.78 | reg=1.14e-12 | w=968225.60 | lr=1.0e-06
+  [VAL] ep 10000  val RMSE($): 2.8274  | spread: 17.630  | OTM/ATM/ITM: 2.474/3.593/3.612
+
+Restored model to val-best epoch 3000 (val rmse_mkt=2.801390)
+
+Training complete in 256.9s
+REPORTED (val-best) test RMSE($): 3.3468  | spread: 33.138  | OTM/ATM/ITM: 3.138/3.983/3.279
+  -> REPORTED test RMSE: $3.35 (val-best epoch: 3000)
+============================================
+Done: Fri May  1 11:45:39 PM EDT 2026
+============================================
