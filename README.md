@@ -37,6 +37,9 @@ The system evolves through three stages, each adding capability while reusing th
 │
 ├── scripts/                                 # Report-time aggregation + plotting
 │   ├── run_local_baselines.sh               # Run BS baseline locally (no GPU)
+│   ├── dump_folds.py                        # Emit per-fold CSVs for R baselines
+│   ├── run_gam_baseline.R                   # GAM (A2): residual smoother on BS errors
+│   ├── run_lagp_baseline.R                  # laGP (A3): local approximate GP on BS errors
 │   ├── build_master_table.py                # Aggregate all results.json → master_table.csv
 │   └── make_report_plots.py                 # Generate report figures from master tables
 │
@@ -65,7 +68,12 @@ The system evolves through three stages, each adding capability while reusing th
 │       └── *_scratch/                       # --from_scratch ablations (no warm-start)
 │
 ├── results/
-│   └── bs_baseline/                         # BS analytical baseline results.json
+│   ├── bs_baseline/                         # BS analytical baseline (A1)
+│   ├── gam_baseline/                        # GAM residual baseline (A2, R/mgcv)
+│   └── lagp_baseline/                       # laGP residual baseline (A3, R/laGP)
+│
+├── data/folds/                              # Per-fold CSVs for R baselines
+│   └── <fold>/                              # train.csv, val.csv, test.csv, meta.json
 │
 ├── reports/                                 # Built by scripts/build_master_table.py + make_report_plots.py
 │   ├── master_table.csv                     # One row per config: pooled metrics
@@ -347,12 +355,57 @@ python run_stage0.py --mode physics --epochs 15000 --rwf_mu 0.75
 python run_stage0.py --mode hybrid  --epochs 15000 --rwf_mu 0.75
 ```
 
-### BS baseline (~10 sec, no GPU)
+### Non-PINN baselines (CPU, no GPU)
+
+Three reference baselines are evaluated on the **same walk-forward folds** as
+the PINN configs, with **per-fold `σ_fixed = train ATM IV median`** (matching
+what BS_A1 and the PINN PDE both use). This makes the comparison
+apples-to-apples — each model sees the same information set and the same
+fold definitions.
+
+| Tag | Method | Target | Features |
+|---|---|---|---|
+| **A1** | Black-Scholes constant-σ | `mid_price` directly | (analytical, no fit) |
+| **A2** | GAM (`mgcv`) | `mid_price − BS(σ_fixed)` | `te(moneyness, time_to_exp) + ns(log_volume)` |
+| **A3** | laGP (`laGP::aGP`) | `mid_price − BS(σ_fixed)` | `(moneyness, time_to_exp, log_volume)` standardized |
+
+**A2/A3 are residual learners** — they learn the smile correction over
+the constant-σ BS solution. This is the same conceptual setup as the PINN's
+hybrid mode (which adds a market-data term to a constant-σ PDE residual).
+
+The `daily_vol_proxy` feature from the legacy R code is **excluded** so the
+information set matches the PINN exactly. Reported numbers will therefore
+differ from the legacy GAM ($12.57) and laGP ($9.63) figures, which used
+the regime indicator AND a smile-contaminated daily-IV-proxy BS baseline.
 
 ```bash
+# A1: BS analytical (~10 sec, Python)
 bash scripts/run_local_baselines.sh
 # Output: results/bs_baseline/results.json
+
+# A2 + A3 setup: dump per-fold CSVs for R consumption
+python scripts/dump_folds.py
+# Output: data/folds/<fold>/{train,val,test}.csv + meta.json (one dir per fold)
+
+# A2: GAM baseline (~30 sec, R/mgcv)
+Rscript scripts/run_gam_baseline.R
+# Output: results/gam_baseline/results.json
+
+# A3: laGP baseline (~3-10 min depending on fold size, R/laGP)
+Rscript scripts/run_lagp_baseline.R
+# Output: results/lagp_baseline/results.json
 ```
+
+**R package requirements:** `mgcv` (for A2), `laGP` (for A3), plus `jsonlite`,
+`dplyr`, `readr`, `splines`. Install with:
+
+```r
+install.packages(c("mgcv", "laGP", "jsonlite", "dplyr", "readr"))
+```
+
+After running all three, `python scripts/build_master_table.py` automatically
+picks them up and writes BS_A1 / GAM_A2 / LAGP_A3 rows alongside the PINN
+configs in `reports/master_table.csv`.
 
 ### Stage 1 walk-forward (single config locally)
 

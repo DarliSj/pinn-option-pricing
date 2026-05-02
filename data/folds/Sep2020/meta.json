@@ -1,0 +1,13 @@
+{
+  "fold": "Sep2020",
+  "train_end": "2020-09-01",
+  "test_start": "2020-09-01",
+  "test_end": "2020-10-01",
+  "val_months": 1,
+  "n_train": 30314,
+  "n_val": 5167,
+  "n_test": 6361,
+  "sigma_fixed": 0.732539,
+  "r_fixed": 0.0018,
+  "n_atm": 8198
+}
