@@ -1,0 +1,79 @@
+{
+  "folds": [
+    {
+      "fold": "Nov2020",
+      "n_train": 41842,
+      "n_val": 5968,
+      "n_test": 6420,
+      "sigma_fixed": 0.7763340000000001,
+      "used_val": true,
+      "restored_to_best": true,
+      "best_val_epoch": 250,
+      "best_val_metric": 5.460182392578217,
+      "rmse_mkt": 7.670342305943241,
+      "mae_mkt": 5.989642352998442,
+      "rmse_spread": 40.31494006597758,
+      "rmse_otm": 7.9189482153238195,
+      "rmse_atm": 8.545728561875917,
+      "rmse_itm": 6.369020975902761,
+      "n_otm": 3656,
+      "n_atm": 1119,
+      "n_itm": 1645,
+      "sum_sq_err_mkt": 377715.25,
+      "sum_abs_err_mkt": 38453.50390625,
+      "sum_sq_err_spread": 10434390.0,
+      "sum_sq_err_otm": 229266.8125,
+      "sum_sq_err_atm": 81719.984375,
+      "sum_sq_err_itm": 66728.484375,
+      "arb_butterfly_ratio": 0.09125,
+      "arb_calendar_ratio": 0.0,
+      "arb_butterfly_max_neg": -1008.4212036132812,
+      "arb_calendar_max_neg": 0.0,
+      "elapsed": 28.712903261184692,
+      "val_epoch": [
+        250,
+        500,
+        750,
+        1000
+      ],
+      "val_rmse_mkt": [
+        5.460182392578217,
+        5.50519715074453,
+        5.480220161966671,
+        5.48658476377981
+      ],
+      "val_rmse_bs_norm": [
+        NaN,
+        NaN,
+        NaN,
+        NaN
+      ]
+    }
+  ],
+  "summary": {
+    "vol_type": "cvol",
+    "pooled_rmse_mkt": 7.670342305943241,
+    "pooled_mae_mkt": 5.989642352998442,
+    "pooled_rmse_spread": 40.31494006597758,
+    "pooled_rmse_otm": 7.9189482153238195,
+    "pooled_rmse_atm": 8.545728561875917,
+    "pooled_rmse_itm": 6.369020975902761,
+    "mean_rmse_mkt": 7.670342305943241,
+    "std_rmse_mkt": 0.0,
+    "worst_rmse_mkt": 7.670342305943241,
+    "worst_fold": "Nov2020",
+    "e_star_mean": 250.0,
+    "e_star_std": 0.0,
+    "e_star_min": 250,
+    "e_star_max": 250,
+    "mean_arb_butterfly_ratio": 0.09125,
+    "mean_arb_calendar_ratio": 0.0,
+    "total_n_test": 6420,
+    "n_folds": 1,
+    "pricing_lr": 0.0001,
+    "vol_lr": 0.001,
+    "epochs": 1000,
+    "rwf_mu": 0.25,
+    "val_months": 1
+  }
+}

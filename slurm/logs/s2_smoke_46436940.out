@@ -1,0 +1,92 @@
+Node: dcc-core-gpu-ferc-s-h36-6  GPU: NVIDIA GeForce RTX 2080 Ti
+Date: Sat May  2 03:11:01 AM EDT 2026
+=== Smoke test 1/2: B10 (μ=0.75) warm-start ===
+Device: cuda
+Loading and preprocessing data...
+Full dataset: 59,668 obs, 2020-01-02 -> 2020-12-31
+
+============================================================
+FOLD 1/1: Nov2020 — Stage 2 (cvol)
+  Train: start -> 2020-11-01  |  Test: 2020-11-01 -> 2020-12-01
+============================================================
+  Train: 41,842  Val: 5,968  Test: 6,420
+  sigma_fixed: 0.7763
+  Loaded warm-start pricing net from runs/walk_forward/modified_hybrid_mu0.75_warmup5000/fold_Nov2020.pt
+Training: mode=hybrid, epochs=1000, lr=0.0001
+  Architecture: Modified MLP + RWF (μ=0.75)
+  Pricing net params: 37,698
+  Vol net params:     5,282 (cvol)
+  Pricing LR: 1.0e-04  |  Vol LR: 1.0e-03
+  Loss terms: ['pde', 'tc', 'bc', 'data', 'reg']
+======================================================================
+Ep     1/1000 | L=3.41e-01 | pde=2.46e-01 | w=1.00 | tc=2.02e-05 | w=231.46 | bc=3.41e-05 | w=245.44 | data=7.04e-04 | w=117.33 | reg=0.00e+00 | w=1.00 | lr=1.0e-04
+  [VAL] ep   250  val RMSE($): 4.9946  | spread: 35.225  | OTM/ATM/ITM: 5.068/5.287/4.351 ★
+  [VAL] ep   500  val RMSE($): 5.0694  | spread: 36.734  | OTM/ATM/ITM: 5.182/5.262/4.398
+  [VAL] ep   750  val RMSE($): 5.0504  | spread: 36.444  | OTM/ATM/ITM: 5.133/5.272/4.464
+  [VAL] ep  1000  val RMSE($): 5.0711  | spread: 36.548  | OTM/ATM/ITM: 5.158/5.293/4.470
+
+Restored model to val-best epoch 250 (val rmse_mkt=4.994610)
+
+Training complete in 32.0s
+REPORTED (val-best) test RMSE($): 6.6465  | spread: 41.240  | OTM/ATM/ITM: 6.777/7.847/5.333
+  -> REPORTED test RMSE: $6.65 (val-best epoch: 250)
+
+
+====================================================================================================
+STAGE 2 WALK-FORWARD RESULTS: vol_type=cvol
+  Single-phase val-best reporting (val held out, test eval'd once on snapshot)
+====================================================================================================
+Fold       |  σ_fix |     E* |  rep($) | spread |      OTM/ATM/ITM |   arb% |   time
+----------------------------------------------------------------------------------------------------
+Nov2020    |  0.776 |    250 |    6.65 |  41.24 |   6.78/7.85/5.33 |  46.9% |     32
+----------------------------------------------------------------------------------------------------
+Pooled     |        |        |    6.65 |  41.24 |   6.78/7.85/5.33 |  46.9% |   <- headline
+Mean(fold) |        |    250 |    6.65 |  E*: mean=250  std=0  min=250 max=250
+
+Results saved to runs/stage2_smoke_B10/cvol/
+
+=== Smoke test 2/2: B12 (μ=0.25) warm-start ===
+Device: cuda
+Loading and preprocessing data...
+Full dataset: 59,668 obs, 2020-01-02 -> 2020-12-31
+
+============================================================
+FOLD 1/1: Nov2020 — Stage 2 (cvol)
+  Train: start -> 2020-11-01  |  Test: 2020-11-01 -> 2020-12-01
+============================================================
+  Train: 41,842  Val: 5,968  Test: 6,420
+  sigma_fixed: 0.7763
+  Loaded warm-start pricing net from runs/walk_forward/modified_hybrid_mu0.25_warmup5000/fold_Nov2020.pt
+Training: mode=hybrid, epochs=1000, lr=0.0001
+  Architecture: Modified MLP + RWF (μ=0.25)
+  Pricing net params: 37,698
+  Vol net params:     5,282 (cvol)
+  Pricing LR: 1.0e-04  |  Vol LR: 1.0e-03
+  Loss terms: ['pde', 'tc', 'bc', 'data', 'reg']
+======================================================================
+Ep     1/1000 | L=1.98e-02 | pde=9.59e-03 | w=1.00 | tc=2.65e-06 | w=46.97 | bc=3.26e-06 | w=83.86 | data=6.67e-04 | w=14.70 | reg=0.00e+00 | w=1.00 | lr=1.0e-04
+  [VAL] ep   250  val RMSE($): 5.4602  | spread: 34.193  | OTM/ATM/ITM: 5.505/5.535/5.210 ★
+  [VAL] ep   500  val RMSE($): 5.5052  | spread: 34.713  | OTM/ATM/ITM: 5.534/5.621/5.266
+  [VAL] ep   750  val RMSE($): 5.4802  | spread: 34.426  | OTM/ATM/ITM: 5.512/5.585/5.241
+  [VAL] ep  1000  val RMSE($): 5.4866  | spread: 34.481  | OTM/ATM/ITM: 5.519/5.594/5.245
+
+Restored model to val-best epoch 250 (val rmse_mkt=5.460182)
+
+Training complete in 28.7s
+REPORTED (val-best) test RMSE($): 7.6703  | spread: 40.315  | OTM/ATM/ITM: 7.919/8.546/6.369
+  -> REPORTED test RMSE: $7.67 (val-best epoch: 250)
+
+
+====================================================================================================
+STAGE 2 WALK-FORWARD RESULTS: vol_type=cvol
+  Single-phase val-best reporting (val held out, test eval'd once on snapshot)
+====================================================================================================
+Fold       |  σ_fix |     E* |  rep($) | spread |      OTM/ATM/ITM |   arb% |   time
+----------------------------------------------------------------------------------------------------
+Nov2020    |  0.776 |    250 |    7.67 |  40.31 |   7.92/8.55/6.37 |   9.1% |     29
+----------------------------------------------------------------------------------------------------
+Pooled     |        |        |    7.67 |  40.31 |   7.92/8.55/6.37 |   9.1% |   <- headline
+Mean(fold) |        |    250 |    7.67 |  E*: mean=250  std=0  min=250 max=250
+
+Results saved to runs/stage2_smoke_B12/cvol/
+Stage 2 smoke done: Sat May  2 03:12:29 AM EDT 2026

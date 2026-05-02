@@ -1,0 +1,10 @@
+/hpc/group/fisherlab/ds555/miniconda3/envs/pinn_env/lib/python3.10/site-packages/torch/autograd/graph.py:825: UserWarning: Attempting to run cuBLAS, but there was no current CUDA context! Attempting to set the primary context... (Triggered internally at ../aten/src/ATen/cuda/CublasHandlePool.cpp:135.)
+  return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+Traceback (most recent call last):
+  File "/hpc/group/fisherlab/ds555/pinn_code/run_stage2.py", line 400, in <module>
+    main()
+  File "/hpc/group/fisherlab/ds555/pinn_code/run_stage2.py", line 274, in main
+    fig1 = plot_training_summary(history, vol_loss_names, suffix)
+  File "/hpc/group/fisherlab/ds555/pinn_code/src/diagnostics.py", line 37, in plot_training_summary
+    axes[2].plot(val_ep, history["rmse_bs_norm"], "b.-", label="RMSE vs BS (norm)")
+KeyError: 'rmse_bs_norm'
