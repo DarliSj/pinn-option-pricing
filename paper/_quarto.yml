@@ -1,0 +1,39 @@
+project:
+  type: default
+  output-dir: _output
+
+# Single-document Quarto project. Render with:
+#   quarto render paper/paper.qmd
+# from the project root, OR `cd paper && quarto render paper.qmd`.
+
+format:
+  pdf:
+    documentclass: article
+    geometry:
+      - margin=1in
+    fontsize: 11pt
+    linestretch: 1.15
+    number-sections: true
+    toc: false
+    colorlinks: true
+    fig-pos: "H"
+    fig-cap-location: bottom
+    tbl-cap-location: top
+    keep-tex: true       # keeps paper.tex alongside paper.pdf for inspection
+    cite-method: biblatex
+  html:
+    toc: true
+    toc-depth: 2
+    code-fold: true
+    embed-resources: true
+
+# Defaults shared across all formats
+execute:
+  echo: false            # hide code by default; show with `#| echo: true` in a chunk
+  warning: false
+  message: false
+  cache: true            # speed up re-renders
+  freeze: auto
+
+bibliography: references.bib
+csl: ieee.csl            # if you want a different style, drop a .csl file here

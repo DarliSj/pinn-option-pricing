@@ -1,0 +1,16 @@
+# Quarto build artifacts
+_output/
+_freeze/
+.quarto/
+*.log
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.toc
+*.out
+*.synctex.gz
+
+# Keep paper.tex (it's useful to inspect; toggle if you'd rather drop it)
+# paper.tex

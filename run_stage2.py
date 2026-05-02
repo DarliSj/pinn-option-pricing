@@ -265,12 +265,16 @@ def main():
         }
         results.append(fold_result)
 
-        # Saved checkpoint = val-best snapshot (post-restore state)
+        # Saved checkpoint = val-best snapshot (post-restore state).
+        # `history` carries per-epoch loss + adaptive-weight series; matches
+        # what run_walk_forward.py saves so stability plots can include
+        # Stage 2 trajectories on equal footing with Stage 1.
         torch.save({
             "model_state_dict": model.state_dict(),
             "vol_model_state_dict": vol_model.state_dict(),
             "config": config,
             "run_info": run_info,
+            "history": history,
         }, output_dir / f"fold_{fold['name']}.pt")
 
         ep = run_info["best_val_epoch"] or run_info["epochs"]

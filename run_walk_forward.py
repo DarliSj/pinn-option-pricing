@@ -206,10 +206,13 @@ def main():
 
         # Save fold checkpoint — this IS the val-best snapshot (the
         # model has already been restored). Stage 2 warm-starts from here.
+        # `history` carries per-epoch loss + adaptive-weight series; needed
+        # for stability/PDE-dominance plots in the paper.
         torch.save({
             "model_state_dict": model.state_dict(),
             "config": config,
             "run_info": run_info,
+            "history": history,
         }, output_dir / f"fold_{fold['name']}.pt")
 
         ep = run_info["best_val_epoch"] or run_info["epochs"]
