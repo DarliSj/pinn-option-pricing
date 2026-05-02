@@ -1,0 +1,83 @@
+============================================
+Job ID:     46457260
+Array task: 1  (B10, warmup=5000)
+GPU:        NVIDIA GeForce RTX 2080 Ti
+============================================
+Device: cuda
+Loading and preprocessing data...
+Full dataset: 59,668 obs, 2020-01-02 → 2020-12-31
+
+============================================================
+FOLD 1/1: Nov2020
+  Train: start → 2020-11-01  |  Test: 2020-11-01 → 2020-12-01
+============================================================
+  Train: 41,842  Val: 5,968  Test: 6,420
+  σ_fixed: 0.7763
+Training: mode=hybrid, epochs=15000, lr=0.001
+  Architecture: Modified MLP + RWF (μ=0.75)
+  Pricing net params: 37,698
+  Loss terms: ['pde', 'tc', 'bc', 'data']
+  Data loss WARMUP: epochs 1..5000 run as physics-only
+======================================================================
+Ep     1/15000 | L=5.73e+06 | pde=4.43e+06 | w=1.00 | tc=9.11e+00 | w=36569.69 | bc=1.06e+01 | w=91537.97 | lr=1.0e-03
+  [VAL] ep   500  val RMSE($): 104.2025  | spread: 442.183  | OTM/ATM/ITM: 117.320/90.662/59.938 ★
+  [VAL] ep  1000  val RMSE($): 35.6089  | spread: 147.984  | OTM/ATM/ITM: 39.690/31.090/22.911 ★
+  [VAL] ep  1500  val RMSE($): 14.4753  | spread: 91.425  | OTM/ATM/ITM: 15.617/12.542/12.146 ★
+Ep  2000/15000 | L=3.62e+01 | pde=3.75e+00 | w=1.00 | tc=7.46e-04 | w=30199.91 | bc=1.31e-04 | w=75533.95 | lr=9.6e-04
+  [VAL] ep  2000  val RMSE($): 16.5429  | spread: 139.769  | OTM/ATM/ITM: 15.723/19.653/15.467
+  [VAL] ep  2500  val RMSE($): 9.5718  | spread: 102.642  | OTM/ATM/ITM: 11.245/5.796/5.876 ★
+  [VAL] ep  3000  val RMSE($): 7.0851  | spread: 50.157  | OTM/ATM/ITM: 7.849/5.181/6.037 ★
+  [VAL] ep  3500  val RMSE($): 6.4891  | spread: 43.955  | OTM/ATM/ITM: 5.965/7.754/6.687 ★
+Ep  4000/15000 | L=6.43e+00 | pde=5.99e-01 | w=1.00 | tc=5.65e-06 | w=25389.36 | bc=9.23e-05 | w=61649.24 | lr=8.4e-04
+  [VAL] ep  4000  val RMSE($): 7.1900  | spread: 63.872  | OTM/ATM/ITM: 7.837/5.755/6.201
+  [VAL] ep  4500  val RMSE($): 7.5620  | spread: 68.826  | OTM/ATM/ITM: 7.750/7.938/6.356
+  [VAL] ep  5000  val RMSE($): 7.1637  | spread: 64.302  | OTM/ATM/ITM: 7.889/6.151/5.296
+  [warmup→hybrid] data loss activated at ep 5001; λ_data init=1.00
+  [VAL] ep  5500  val RMSE($): 6.0058  | spread: 38.126  | OTM/ATM/ITM: 5.879/6.168/6.255 ★
+Ep  6000/15000 | L=3.06e+00 | pde=3.04e-01 | w=1.00 | tc=2.95e-05 | w=21006.23 | bc=3.98e-05 | w=50750.48 | data=7.27e-04 | w=160.41 | lr=6.6e-04
+  [VAL] ep  6000  val RMSE($): 6.2168  | spread: 46.578  | OTM/ATM/ITM: 6.647/5.546/5.298
+  [VAL] ep  6500  val RMSE($): 7.6897  | spread: 73.188  | OTM/ATM/ITM: 8.497/6.768/5.305
+  [VAL] ep  7000  val RMSE($): 5.3119  | spread: 39.279  | OTM/ATM/ITM: 5.524/5.342/4.443 ★
+  [VAL] ep  7500  val RMSE($): 5.2385  | spread: 37.872  | OTM/ATM/ITM: 5.211/5.540/4.976 ★
+Ep  8000/15000 | L=7.47e-01 | pde=7.26e-02 | w=1.00 | tc=2.62e-07 | w=18632.95 | bc=1.02e-05 | w=41499.77 | data=5.29e-04 | w=462.62 | lr=4.5e-04
+  [VAL] ep  8000  val RMSE($): 5.1899  | spread: 37.699  | OTM/ATM/ITM: 5.338/5.352/4.415 ★
+  [VAL] ep  8500  val RMSE($): 5.1070  | spread: 32.641  | OTM/ATM/ITM: 5.089/5.344/4.890 ★
+  [VAL] ep  9000  val RMSE($): 5.1873  | spread: 33.515  | OTM/ATM/ITM: 5.192/5.484/4.810
+  [VAL] ep  9500  val RMSE($): 5.1454  | spread: 32.131  | OTM/ATM/ITM: 5.404/4.940/4.379
+Ep 10000/15000 | L=6.16e-01 | pde=6.96e-02 | w=1.00 | tc=7.93e-06 | w=15440.93 | bc=2.57e-07 | w=35911.00 | data=5.32e-04 | w=779.90 | lr=2.6e-04
+  [VAL] ep 10000  val RMSE($): 5.1462  | spread: 31.965  | OTM/ATM/ITM: 5.352/5.113/4.386
+  [VAL] ep 10500  val RMSE($): 5.3606  | spread: 34.717  | OTM/ATM/ITM: 5.499/5.505/4.655
+  [VAL] ep 11000  val RMSE($): 5.9570  | spread: 43.792  | OTM/ATM/ITM: 6.129/6.207/4.967
+  [VAL] ep 11500  val RMSE($): 5.5782  | spread: 39.672  | OTM/ATM/ITM: 5.863/5.482/4.560
+Ep 12000/15000 | L=5.50e-01 | pde=5.64e-02 | w=1.00 | tc=2.95e-07 | w=13121.57 | bc=3.69e-07 | w=30144.77 | data=5.05e-04 | w=946.24 | lr=1.0e-04
+  [VAL] ep 12000  val RMSE($): 5.6399  | spread: 40.262  | OTM/ATM/ITM: 5.881/5.653/4.673
+  [VAL] ep 12500  val RMSE($): 5.7992  | spread: 41.675  | OTM/ATM/ITM: 6.059/5.796/4.774
+  [VAL] ep 13000  val RMSE($): 5.6526  | spread: 38.759  | OTM/ATM/ITM: 5.880/5.688/4.714
+  [VAL] ep 13500  val RMSE($): 5.7428  | spread: 40.675  | OTM/ATM/ITM: 5.950/5.828/4.825
+Ep 14000/15000 | L=6.01e-01 | pde=5.61e-02 | w=1.00 | tc=8.42e-08 | w=12724.18 | bc=1.91e-08 | w=32757.21 | data=4.96e-04 | w=1095.57 | lr=2.1e-05
+  [VAL] ep 14000  val RMSE($): 5.7405  | spread: 39.981  | OTM/ATM/ITM: 5.927/5.888/4.830
+  [VAL] ep 14500  val RMSE($): 5.7645  | spread: 40.397  | OTM/ATM/ITM: 5.965/5.878/4.838
+  [VAL] ep 15000  val RMSE($): 5.8361  | spread: 41.076  | OTM/ATM/ITM: 6.057/5.935/4.842
+
+Restored model to val-best epoch 8500 (val rmse_mkt=5.107019)
+
+Training complete in 331.6s
+REPORTED (val-best) test RMSE($): 6.6221  | spread: 38.991  | OTM/ATM/ITM: 6.393/7.881/6.168
+  → REPORTED test RMSE vs Market: $6.62 (val-best epoch: 8500)
+
+
+======================================================================================
+WALK-FORWARD RESULTS: arch=modified, mode=hybrid, μ=0.75
+  Single-phase val-best reporting (val held out, test eval'd once on snapshot)
+====================================================================================================
+Fold       |  σ_fix |     E* |  rep($) | spread |      OTM/ATM/ITM |   arb% |   time
+----------------------------------------------------------------------------------------------------
+Nov2020    |  0.776 |   8500 |    6.62 |  38.99 |   6.39/7.88/6.17 |  33.5% |    332
+----------------------------------------------------------------------------------------------------
+Pooled     |        |        |    6.62 |  38.99 |   6.39/7.88/6.17 |  33.5% |   ← headline
+Mean(fold) |        |   8500 |    6.62 |  E*: mean=8500  std=0  min=8500 max=8500
+
+Results saved to runs/walk_forward_history/modified_hybrid_mu0.75_warmup5000/
+============================================
+Done: Sat May  2 01:02:07 PM EDT 2026
+============================================
