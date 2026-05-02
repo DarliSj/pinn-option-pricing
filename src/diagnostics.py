@@ -34,9 +34,13 @@ def plot_training_summary(history, loss_names, title_suffix=""):
 
     # Validation
     val_ep = history["val_epoch"]
-    axes[2].plot(val_ep, history["rmse_bs_norm"], "b.-", label="RMSE vs BS (norm)")
+    # Validation series — single-phase val-best scheme uses val_* keys.
+    # Fall back to legacy keys (rmse_*) for back-compat with old runs.
+    bs_norm_series = history.get("val_rmse_bs_norm", history.get("rmse_bs_norm", []))
+    mkt_series     = history.get("val_rmse_mkt",     history.get("rmse_mkt",     []))
+    axes[2].plot(val_ep, bs_norm_series, "b.-", label="RMSE vs BS (norm)")
     ax2 = axes[2].twinx()
-    ax2.plot(val_ep, history["rmse_mkt"], "r.-", label="RMSE vs Market ($)")
+    ax2.plot(val_ep, mkt_series, "r.-", label="RMSE vs Market ($)")
     axes[2].set_xlabel("Epoch")
     axes[2].set_ylabel("RMSE vs BS (norm)", color="blue")
     ax2.set_ylabel("RMSE vs Market ($)", color="red")
@@ -88,12 +92,14 @@ def plot_full_diagnostics(history, loss_names, title_suffix=""):
     axes[0, 2].legend()
     axes[0, 2].grid(True, alpha=0.3)
 
-    # 4. Validation
+    # 4. Validation — same val_*/legacy fallback as plot_training_summary
     val_ep = history["val_epoch"]
     ax_bs = axes[1, 0]
     ax_mkt = ax_bs.twinx()
-    ax_bs.plot(val_ep, history["rmse_bs_norm"], "b.-", label="RMSE vs BS (norm)")
-    ax_mkt.plot(val_ep, history["rmse_mkt"], "r.-", label="RMSE vs Market ($)")
+    bs_norm_series = history.get("val_rmse_bs_norm", history.get("rmse_bs_norm", []))
+    mkt_series     = history.get("val_rmse_mkt",     history.get("rmse_mkt",     []))
+    ax_bs.plot(val_ep, bs_norm_series, "b.-", label="RMSE vs BS (norm)")
+    ax_mkt.plot(val_ep, mkt_series, "r.-", label="RMSE vs Market ($)")
     ax_bs.set_xlabel("Epoch")
     ax_bs.set_ylabel("RMSE vs BS (norm)", color="blue")
     ax_mkt.set_ylabel("RMSE vs Market ($)", color="red")

@@ -140,6 +140,17 @@ def main():
     # ── Run each fold ───────────────────────────────────────────────
     results = []
 
+    def _save_partial_summary():
+        """Write a partial results.json so we keep state even if a later
+        fold dies. Overwritten by the final write at end of main()."""
+        if not results:
+            return
+        try:
+            with open(output_dir / "results_partial.json", "w") as f:
+                json.dump({"folds": results, "summary": {"n_folds_so_far": len(results)}}, f, indent=2)
+        except Exception as e:
+            print(f"  WARN: could not write partial summary: {e}")
+
     for i, fold in enumerate(folds_to_run):
         print(f"\n{'='*60}")
         print(f"FOLD {i+1}/{len(folds_to_run)}: {fold['name']} — Stage 2 ({args.vol_type})")
@@ -266,34 +277,44 @@ def main():
         print(f"  -> REPORTED test RMSE: ${run_info['final_rmse_mkt']:.2f} "
               f"(val-best epoch: {ep})")
 
-        # Per-fold diagnostics — built on the val-best model
+        # Per-fold diagnostics — built on the val-best model.
+        # Wrapped in try/except so a single plot failure cannot kill the
+        # walk-forward loop (was a likely cause of "only fold 1 saved" jobs).
         if not args.no_plots:
             suffix = f"({args.vol_type}, {fold['name']}, ep*={ep})"
-
             vol_loss_names = ["pde", "tc", "bc", "data", "reg"]
-            fig1 = plot_training_summary(history, vol_loss_names, suffix)
-            fig1.savefig(output_dir / f"fold_{fold['name']}_training.png",
-                        dpi=150, bbox_inches="tight")
-            plt.close(fig1)
-
             is_cvol = (args.vol_type == "cvol")
-            fig2 = plot_vol_surface(vol_model, config, device,
-                                    config["sigma_fixed"], suffix,
-                                    is_cvol=is_cvol)
-            fig2.savefig(output_dir / f"fold_{fold['name']}_vol_surface.png",
-                        dpi=150, bbox_inches="tight")
-            plt.close(fig2)
+            plot_jobs = [
+                ("training", lambda: plot_training_summary(history, vol_loss_names, suffix)),
+                ("vol_surface", lambda: plot_vol_surface(vol_model, config, device,
+                                                         config["sigma_fixed"], suffix,
+                                                         is_cvol=is_cvol)),
+                ("vol_slices", lambda: plot_vol_slices(vol_model, config, device,
+                                                       config["sigma_fixed"], suffix)),
+                ("test_scatter", lambda: plot_test_scatter(model, test_arrays,
+                                                           "hybrid", device, suffix)),
+            ]
+            for name, factory in plot_jobs:
+                try:
+                    fig = factory()
+                    if isinstance(fig, tuple):  # plot_test_scatter returns (fig, _)
+                        fig = fig[0]
+                    fig.savefig(output_dir / f"fold_{fold['name']}_{name}.png",
+                                dpi=150, bbox_inches="tight")
+                    plt.close(fig)
+                except Exception as e:
+                    print(f"  WARN: plot '{name}' failed for {fold['name']}: {e}")
+                    plt.close("all")
 
-            fig3 = plot_vol_slices(vol_model, config, device,
-                                   config["sigma_fixed"], suffix)
-            fig3.savefig(output_dir / f"fold_{fold['name']}_vol_slices.png",
-                        dpi=150, bbox_inches="tight")
-            plt.close(fig3)
+        # Free GPU memory before next fold (prevents accumulating state
+        # across 9 folds, which on a 2080 was OOM-killing the array).
+        del model, vol_model
+        if device.type == "cuda":
+            torch.cuda.empty_cache()
 
-            fig4, _ = plot_test_scatter(model, test_arrays, "hybrid", device, suffix)
-            fig4.savefig(output_dir / f"fold_{fold['name']}_test_scatter.png",
-                        dpi=150, bbox_inches="tight")
-            plt.close(fig4)
+        # Persist progress after every fold so a mid-loop crash doesn't
+        # lose work that already finished.
+        _save_partial_summary()
 
     # ── Summary table ───────────────────────────────────────────────
     if not results:
@@ -392,6 +413,14 @@ def main():
     }
     with open(output_dir / "results.json", "w") as f:
         json.dump({"folds": results, "summary": summary}, f, indent=2)
+
+    # Clean up partial-progress file once the final summary is written
+    partial = output_dir / "results_partial.json"
+    if partial.exists():
+        try:
+            partial.unlink()
+        except Exception:
+            pass
 
     print(f"\nResults saved to {output_dir}/")
 
