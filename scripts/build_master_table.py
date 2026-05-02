@@ -40,6 +40,8 @@ CONFIG_ORDER = [
     "B8_modified_hybrid_mu0.0",
     "B9_modified_hybrid_mu0.75_fixdata1000.0",
     "B10_modified_hybrid_mu0.75_warmup5000",
+    "B11_modified_hybrid_mu0.5_warmup5000",
+    "B12_modified_hybrid_mu0.25_warmup5000",
     "S2_cvol",
     "S2_avol",
     "S2_cvol_scratch",
@@ -111,6 +113,8 @@ def _tag_from_walk_forward_dir(dirname: str) -> str:
         "modified_hybrid_mu0.0":                       "B8",
         "modified_hybrid_mu0.75_fixdata1000.0":        "B9",
         "modified_hybrid_mu0.75_warmup5000":           "B10",
+        "modified_hybrid_mu0.5_warmup5000":            "B11",
+        "modified_hybrid_mu0.25_warmup5000":           "B12",
     }
     prefix = mapping.get(dirname, "B?")
     return f"{prefix}_{dirname}"

@@ -42,10 +42,10 @@ The system evolves through three stages, each adding capability while reusing th
 │
 ├── slurm/                                   # SLURM scripts for Duke DCC
 │   ├── run_smoke_test.sh                    # 1-fold smoke test
-│   ├── run_benchmark.sh                     # B0–B10 array (11 configs)
+│   ├── run_benchmark.sh                     # B0–B12 array (13 configs)
 │   ├── run_stage2_smoke.sh                  # Stage 2 smoke test
 │   ├── run_stage2.sh                        # Stage 2 array (cvol + avol)
-│   ├── submit_all.sh                        # Submits smoke → B0–B10 with dependency
+│   ├── submit_all.sh                        # Submits smoke → B0–B12 with dependency
 │   └── submit_stage2.sh                     # Submits Stage 2 smoke → cvol + avol
 │
 ├── runs/                                    # All training output (checkpoints, logs, plots, results.json)
@@ -54,9 +54,11 @@ The system evolves through three stages, each adding capability while reusing th
 │   │   ├── standard_hybrid/                 # B1
 │   │   ├── modified_physics_mu{0.5,0.75,1.0}/        # B2-B4
 │   │   ├── modified_hybrid_mu{0.5,0.75,1.0}/         # B5-B7
-│   │   ├── modified_hybrid_mu0.0/                    # B8 — RWF init fix
-│   │   ├── modified_hybrid_mu0.75_fixdata1000.0/     # B9 — fixed λ_data ablation
-│   │   └── modified_hybrid_mu0.75_warmup5000/        # B10 — physics-warmup ablation
+│   │   ├── modified_hybrid_mu0.0/                    # B8  — RWF init fix
+│   │   ├── modified_hybrid_mu0.75_fixdata1000.0/     # B9  — fixed λ_data ablation
+│   │   ├── modified_hybrid_mu0.75_warmup5000/        # B10 — physics-warmup (best on RMSE)
+│   │   ├── modified_hybrid_mu0.5_warmup5000/         # B11 — moderate-μ + warmup
+│   │   └── modified_hybrid_mu0.25_warmup5000/        # B12 — low-μ + warmup probe
 │   └── stage2/
 │       ├── cvol/                            # C-Vol (multiplicative)
 │       ├── avol/                            # A-Vol (direct softplus)
@@ -247,7 +249,7 @@ Total loss is `L = Σ λ_i · L_i`. Weights `λ_i` are adapted every 1000 epochs
 
 Safety floor of 10 on `L_tc` and `L_bc` weights prevents boundary collapse. Pricing and vol gradients are clipped **separately** so a large pricing-grad update doesn't crush the vol-grad signal.
 
-**Important caveat**: Wang's scheme was tested only on `L_pde + L_ic + L_bc` (no data term). Adding a 4th supervised `L_data` term can drive `λ_data` to runaway values when paired with high RWF μ — see `reports/results_summary.md` and the B8/B9/B10 ablations. `update_adaptive_weights` accepts an `excluded_terms` set so individual loss weights can be pinned out of the balancing scheme (used by B9: `--fixed_data_weight`).
+**Important caveat**: Wang's scheme was tested only on `L_pde + L_ic + L_bc` (no data term). Adding a 4th supervised `L_data` term can drive `λ_data` to runaway values when paired with high RWF μ — see `reports/results_summary.md` and the B8–B12 ablations. `update_adaptive_weights` accepts an `excluded_terms` set so individual loss weights can be pinned out of the balancing scheme (used by B9: `--fixed_data_weight`).
 
 ------------------------------------------------------------------------
 
@@ -259,7 +261,7 @@ Single fixed train/test split. For rapid iteration during architecture developme
 
 ### Stage 1: Walk-Forward Benchmarking (`run_walk_forward.py`)
 
-The benchmark table — 11 configs run the same `run_training` per fold:
+The benchmark table — 13 configs run the same `run_training` per fold:
 
 | Config | Arch | Mode | μ | Extra | Purpose |
 |----|----|----|----|----|----|
@@ -272,8 +274,10 @@ The benchmark table — 11 configs run the same `run_training` per fold:
 | **B6** | Modified | Hybrid | 0.75 | — | μ sweep (hybrid) |
 | **B7** | Modified | Hybrid | 1.00 | — | μ sweep (hybrid) |
 | **B8** | Modified | Hybrid | 0.00 | — | RWF init fix — kills initial gradient blowup |
-| **B9** | Modified | Hybrid | 0.75 | `λ_data=1000` fixed | Fix #2 — decouple data from grad-norm balancing |
-| **B10** | Modified | Hybrid | 0.75 | `warmup=5000` | Fix #5 — pre-train PDE for 5k epochs, then add data |
+| **B9** | Modified | Hybrid | 0.75 | `λ_data=1000` fixed | Decouple data from grad-norm balancing |
+| **B10** | Modified | Hybrid | 0.75 | `warmup=5000` | Pre-train PDE 5k epochs, then add data (best on RMSE) |
+| **B11** | Modified | Hybrid | 0.50 | `warmup=5000` | Stack: moderate μ + warmup (complement vs substitute test) |
+| **B12** | Modified | Hybrid | 0.25 | `warmup=5000` | Low μ + warmup probe — fills the μ × warmup grid |
 
 ### Stage 2: Learnable Volatility (`run_stage2.py`)
 
@@ -353,14 +357,14 @@ bash scripts/run_local_baselines.sh
 ### Stage 1 walk-forward (single config locally)
 
 ```bash
-# Example: modified hybrid μ=0.75 (one of the eleven configs)
+# Example: modified hybrid μ=0.75 (one of the thirteen configs)
 python run_walk_forward.py --mode hybrid --arch modified --rwf_mu 0.75 --epochs 15000
 
 # Single-fold smoke test
 python run_walk_forward.py --mode hybrid --arch modified --rwf_mu 0.75 \
     --epochs 1500 --folds Nov2020 --output_dir runs/_smoke
 
-# Loss-balancing ablations (B8/B9/B10):
+# Loss-balancing ablations (B8–B12):
 # B8 — kill RWF init blowup
 python run_walk_forward.py --mode hybrid --arch modified --rwf_mu 0.0 --epochs 15000
 
@@ -371,9 +375,17 @@ python run_walk_forward.py --mode hybrid --arch modified --rwf_mu 0.75 \
 # B10 — physics-only warmup, then turn on data
 python run_walk_forward.py --mode hybrid --arch modified --rwf_mu 0.75 \
     --data_loss_warmup 5000 --epochs 15000
+
+# B11 — moderate μ + warmup (stack the two fixes)
+python run_walk_forward.py --mode hybrid --arch modified --rwf_mu 0.5 \
+    --data_loss_warmup 5000 --epochs 15000
+
+# B12 — low μ + warmup (μ × warmup grid completion)
+python run_walk_forward.py --mode hybrid --arch modified --rwf_mu 0.25 \
+    --data_loss_warmup 5000 --epochs 15000
 ```
 
-### Stage 1 on DCC (all 11 configs in parallel)
+### Stage 1 on DCC (all 13 configs in parallel)
 
 ```bash
 # From your local clone, push first:
@@ -383,27 +395,26 @@ git push origin main
 ssh ds555@dcc-login.oit.duke.edu
 cd /hpc/group/fisherlab/ds555/pinn_code
 git pull
-bash slurm/submit_all.sh   # smoke → B0-B10 array (11 tasks, ~3-4h each)
+bash slurm/submit_all.sh   # smoke → B0-B12 array (13 tasks, ~3-4h each)
 
-# Or submit one task at a time, e.g. just B8:
-sbatch --array=8 slurm/run_benchmark.sh
+# Or submit specific tasks, e.g. just the new ones:
+sbatch --array=11,12 slurm/run_benchmark.sh
 ```
 
 ### Stage 2 (learnable volatility) — locally
 
 Requires Stage 1 checkpoints (warm-start from your best Stage 1 config).
-Pick `--checkpoint_dir` based on `reports/master_table.csv`; example uses
-the originally-planned B6, but in practice the right choice depends on
-which Stage 1 config wins:
+Pick `--checkpoint_dir` based on `reports/master_table.csv`; the SLURM
+script defaults to B10 (current best on pooled RMSE):
 
 ```bash
 python run_stage2.py --vol_type cvol \
-    --checkpoint_dir runs/walk_forward/modified_hybrid_mu0.75 \
+    --checkpoint_dir runs/walk_forward/modified_hybrid_mu0.75_warmup5000 \
     --pricing_lr 1e-4 --vol_lr 1e-3 \
     --epochs 10000 --rwf_mu 0.75
 
 python run_stage2.py --vol_type avol \
-    --checkpoint_dir runs/walk_forward/modified_hybrid_mu0.75 \
+    --checkpoint_dir runs/walk_forward/modified_hybrid_mu0.75_warmup5000 \
     --pricing_lr 1e-4 --vol_lr 1e-3 \
     --epochs 10000 --rwf_mu 0.75
 
@@ -417,8 +428,9 @@ python run_stage2.py --vol_type cvol --from_scratch \
 After Stage 1 finishes and you've picked a winning config:
 
 ```bash
-# Edit STAGE1_MU (and the warm-start dir name if different from
-# modified_hybrid_muX) in slurm/run_stage2.sh and run_stage2_smoke.sh.
+# slurm/run_stage2.sh and run_stage2_smoke.sh both default to B10
+# (modified_hybrid_mu0.75_warmup5000) as the warm-start. Edit STAGE1_DIR
+# / STAGE1_MU in those files if you want a different Stage 1 checkpoint.
 # Then:
 bash slurm/submit_stage2.sh
 ```

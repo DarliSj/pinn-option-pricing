@@ -1,13 +1,13 @@
 #!/bin/bash
 # ============================================================
 # PINN Walk-Forward Benchmark — SLURM Job Array
-# Runs B0–B10: arch × mode × μ + 3 loss-balancing ablations.
+# Runs B0–B12: arch × mode × μ + 5 loss-balancing ablations.
 #
 # Submit with:
-#   sbatch --array=0-10 slurm/run_benchmark.sh
+#   sbatch --array=0-12 slurm/run_benchmark.sh
 #
-# Or a single config for testing:
-#   sbatch --array=8 slurm/run_benchmark.sh
+# Or specific tasks:
+#   sbatch --array=11,12 slurm/run_benchmark.sh
 #
 # Task → config mapping:
 #   0: standard physics                              (B0)  naive baseline
@@ -24,6 +24,12 @@
 #                                                          for μ=0.75; gives data enough signal to
 #                                                          compete without runaway to 10⁵+)
 #  10: modified hybrid   μ=0.75  warmup=5000        (B10) fix #5: pre-train PDE then add data
+#  11: modified hybrid   μ=0.50  warmup=5000        (B11) stack: moderate μ + warmup
+#                                                          tests if μ-down + warmup are
+#                                                          complementary or substitutes
+#  12: modified hybrid   μ=0.25  warmup=5000        (B12) low-μ + warmup probe — fills the
+#                                                          μ × warmup grid; expect ≈ B11
+#                                                          if warmup dominates
 # ============================================================
 
 #SBATCH --job-name=pinn_benchmark
@@ -49,11 +55,11 @@ echo "Date:       $(date)"
 echo "============================================"
 
 # ── Config lookup (task ID → arch + mode + μ + extras) ────
-ARCHS=(standard standard modified modified modified modified modified modified modified modified modified)
-MODES=(physics  hybrid   physics  physics  physics  hybrid   hybrid   hybrid   hybrid   hybrid   hybrid)
-MUS=(   1.0     1.0      0.5      0.75     1.0      0.5      0.75     1.0      0.0      0.75     0.75)
-FIXED_DATA=("" "" "" "" "" "" "" "" "" "1000.0" "")
-WARMUP=(0 0 0 0 0 0 0 0 0 0 5000)
+ARCHS=(standard standard modified modified modified modified modified modified modified modified modified modified modified)
+MODES=(physics  hybrid   physics  physics  physics  hybrid   hybrid   hybrid   hybrid   hybrid   hybrid   hybrid   hybrid)
+MUS=(   1.0     1.0      0.5      0.75     1.0      0.5      0.75     1.0      0.0      0.75     0.75    0.5     0.25)
+FIXED_DATA=("" "" "" "" "" "" "" "" "" "1000.0" "" "" "")
+WARMUP=(0 0 0 0 0 0 0 0 0 0 5000 5000 5000)
 
 ARCH=${ARCHS[$SLURM_ARRAY_TASK_ID]}
 MODE=${MODES[$SLURM_ARRAY_TASK_ID]}

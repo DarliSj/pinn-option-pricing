@@ -3,9 +3,10 @@
 # Submit Stage 2: smoke test + both vol_types (C-Vol, A-Vol)
 #
 # REQUIRES:
-#   1. Stage 1 B2-B7 array has finished successfully
-#   2. You have selected a μ from Stage 1 walk-forward results
-#   3. You edited STAGE1_MU in run_stage2_smoke.sh AND run_stage2.sh
+#   1. Stage 1 B0-B12 array has finished successfully
+#   2. You have selected a Stage 1 config to warm-start from
+#   3. STAGE1_DIR / STAGE1_MU set in run_stage2_smoke.sh AND run_stage2.sh
+#      (currently both point to B10 = modified_hybrid_mu0.75_warmup5000)
 #
 # Run from project root: bash slurm/submit_stage2.sh
 # ============================================================
