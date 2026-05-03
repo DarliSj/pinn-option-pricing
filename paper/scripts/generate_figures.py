@@ -112,7 +112,7 @@ def fig_loss_curves_stability():
             f"            {HIST_DIR/B10_TAG/'fold_Nov2020.pt'}"
         )
 
-    fig, axes = plt.subplots(1, 2, figsize=(11, 4), sharey=True)
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5.5), sharey=True)
     for ax, h, title in zip(axes, [h_b6, h_b10],
                             ["B6 — modified hybrid, μ=0.75 (no warmup)",
                              "B10 — modified hybrid, μ=0.75, warmup=5000"]):
@@ -124,8 +124,13 @@ def fig_loss_curves_stability():
         ax.set_xlabel("Epoch")
         ax.set_title(title)
     axes[0].set_ylabel("Loss (log)")
-    axes[1].legend(loc="best", fontsize=9)
-    fig.suptitle("Per-loss training curves: failure mode vs. warmup fix", y=1.02)
+    # Tighten y-range to actual data (~10^-7 to 10^6) — default is too generous
+    # and visually compresses everything into a thin band.
+    axes[0].set_ylim(1e-8, 1e7)
+    axes[1].legend(loc="upper right", fontsize=9, ncol=2, framealpha=0.9)
+    fig.suptitle("Per-loss training curves: failure mode vs. warmup fix",
+                 y=0.995, fontsize=12)
+    fig.tight_layout(rect=[0, 0, 1, 0.97])
     fig.savefig(OUT / "fig-loss-curves-stability.png")
     plt.close(fig)
 
@@ -142,7 +147,10 @@ def fig_weight_traj_stability():
         raise FileNotFoundError("history missing — see fig_loss_curves_stability.")
 
     fig, axes = plt.subplots(1, 2, figsize=(11, 4), sharey=True)
-    weight_names = ["pde", "tc", "bc", "data", "reg"]
+    # Weight names depend on whether the run included a reg term — discover
+    # from the history dict so this works in both physics and hybrid modes.
+    weight_names = [n for n in ("pde", "tc", "bc", "data", "reg")
+                    if f"w_{n}" in h_b10]
     for ax, h, title in zip(axes, [h_b6, h_b10],
                             ["B6 (no warmup) — $\\lambda_\\mathrm{data}$ runaway",
                              "B10 (warmup=5000) — bounded weights"]):
@@ -210,57 +218,95 @@ def _load_master_table():
 def fig_arb_rmse_pareto():
     """Scatter: total arb% (butterfly + calendar) vs pooled RMSE.
 
-    Each B-config is one point; baselines (BS_A1, GAM_A2) plotted with
-    distinct markers. Lower-left is the Pareto frontier — B10 should
-    sit there.
+    All Stage 1 (B0–B12) and Stage 2 (S2_B10/B12 × cvol/avol) configs
+    appear as points; BS_A1 and GAM_A2 are horizontal references.
+    Lower-left = Pareto frontier.
     """
     mt = _load_master_table()
-    # Only configs with arb numbers (B*); baselines have NaN arb
-    pinns = mt[mt["config"].str.startswith("B")].copy()
+    pinns = mt[mt["config"].str.startswith(("B", "S2_"))].copy()
     pinns["arb_total"] = pinns["arb_butterfly%"] + pinns["arb_calendar%"]
 
-    bs   = mt[mt["config"] == "BS_A1"]
-    gam  = mt[mt["config"] == "GAM_A2"]
-    lagp = mt[mt["config"] == "LAGP_A3"]
+    bs  = mt[mt["config"] == "BS_A1"]
+    gam = mt[mt["config"] == "GAM_A2"]
 
-    fig, ax = plt.subplots(1, 1, figsize=(7.5, 5))
+    fig, ax = plt.subplots(1, 1, figsize=(8.5, 5.5))
 
-    # PINN configs — labelled by short tag (B0..B12)
-    short_tag = pinns["config"].str.extract(r"(B\d+)")[0]
-    is_b10  = short_tag == "B10"
+    # Categorize every row into one visual class
+    is_s2   = pinns["config"].str.startswith("S2_")
     is_warm = pinns["config"].str.contains("warmup")
-    for sel, color, lbl in [
-        (~is_warm,            "#888888", "Stage 1 (no warmup)"),
-        (is_warm & ~is_b10,   "#1f77b4", "Stage 1 (warmup family)"),
-        (is_b10,              "#d62728", "B10 (best Pareto)"),
-    ]:
-        ax.scatter(pinns.loc[sel, "arb_total"], pinns.loc[sel, "pooled_rmse"],
-                   c=color, s=70, label=lbl, alpha=0.9, edgecolor="white",
-                   linewidth=0.8, zorder=3)
+    short   = pinns["config"].str.extract(r"^(B\d+|S2_B\d+_\w+)")[0]
+    is_b10  = short == "B10"
 
+    classes = [
+        (is_s2 & pinns["config"].str.endswith("_cvol"),
+            "#e75100", "o", 90, "Stage 2 (C-Vol)"),
+        (is_s2 & pinns["config"].str.endswith("_avol"),
+            "#2c8c2c", "s", 90, "Stage 2 (A-Vol)"),
+        (~is_s2 & is_b10,
+            "#d62728", "*", 220, "B10 (Stage 1, best Pareto)"),
+        (~is_s2 & is_warm & ~is_b10,
+            "#1f77b4", "o", 70, "Stage 1 (warmup family)"),
+        (~is_s2 & ~is_warm,
+            "#888888", "o", 60, "Stage 1 (no warmup)"),
+    ]
+    for sel, color, marker, size, lbl in classes:
+        sub = pinns[sel]
+        ax.scatter(sub["arb_total"], sub["pooled_rmse"],
+                   c=color, marker=marker, s=size, label=lbl,
+                   alpha=0.92, edgecolor="white", linewidth=0.8, zorder=3)
+
+    # Annotate each point with a short label (B7, B10, S2_B12_cvol → "B12c", etc.)
+    def short_label(name):
+        if name.startswith("S2_"):
+            warm = name.split("_")[1]                    # B10 / B12
+            v    = name.split("_")[2][0].upper()         # C / A
+            return f"{warm}/{v}V"
+        return name.split("_")[0]                        # B0..B12
+
+    # Per-config offset overrides — needed in the dense lower-left cluster
+    # where multiple labels would otherwise overlap each other or markers.
+    # Format: config → (dx_points, dy_points, ha). For ha="right" the text's
+    # RIGHT edge lands at the offset, so a small negative dx places the label
+    # cleanly to the left of the marker without running off the axis.
+    # Missing configs use the default (5, 3, "left").
+    ANNOTATION_OFFSETS = {
+        "B11_modified_hybrid_mu0.5_warmup5000":   (8,  8,  "left"),  # up-right
+        "B12_modified_hybrid_mu0.25_warmup5000":  (-3, -14, "right"), # below-left
+        "S2_B12_cvol":                            (-6, 0,  "right"), # left of dot
+        "S2_B10_cvol":                            (8, -14, "left"),  # down-right
+        "S2_B12_avol":                            (-6, 0,  "right"), # left of square
+        "S2_B10_avol":                            (-6, 0,  "right"), # left of square
+        "B4_modified_physics_mu1.0":              (5, -12, "left"),  # below the BS line
+    }
     for _, row in pinns.iterrows():
-        tag = row["config"].split("_")[0]
-        ax.annotate(tag,
+        dx, dy, ha = ANNOTATION_OFFSETS.get(row["config"], (5, 3, "left"))
+        ax.annotate(short_label(row["config"]),
                     xy=(row["arb_total"], row["pooled_rmse"]),
-                    xytext=(4, 3), textcoords="offset points",
-                    fontsize=8, color="#444")
+                    xytext=(dx, dy), textcoords="offset points",
+                    fontsize=8, color="#444", ha=ha)
 
-    # Baselines — horizontal lines (no arb metric for them)
+    # Baselines as horizontal references — flush-right with padding inside the
+    # axes so the text doesn't bleed into the upper-right point cluster (B6/B7).
+    xmax = ax.get_xlim()[1]
     if not bs.empty:
         y = bs["pooled_rmse"].iloc[0]
-        ax.axhline(y, color="black", ls=":", lw=1)
-        ax.text(ax.get_xlim()[1] * 0.98, y, f"  BS_A1 ($\\${y:.2f})",
-                ha="right", va="bottom", fontsize=9, color="black")
+        ax.axhline(y, color="black", ls=":", lw=1, zorder=1)
+        ax.text(xmax - 1, y - 0.04, f"BS_A1 (\\${y:.2f})",
+                ha="right", va="top", fontsize=8.5, color="black",
+                bbox=dict(facecolor="white", edgecolor="none",
+                          alpha=0.85, pad=1))
     if not gam.empty:
         y = gam["pooled_rmse"].iloc[0]
-        ax.axhline(y, color="#9467bd", ls=":", lw=1)
-        ax.text(ax.get_xlim()[1] * 0.98, y, f"  GAM_A2 (\\${y:.2f})",
-                ha="right", va="bottom", fontsize=9, color="#9467bd")
+        ax.axhline(y, color="#9467bd", ls=":", lw=1, zorder=1)
+        ax.text(xmax - 1, y + 0.02, f"GAM_A2 (\\${y:.2f})",
+                ha="right", va="bottom", fontsize=8.5, color="#9467bd",
+                bbox=dict(facecolor="white", edgecolor="none",
+                          alpha=0.85, pad=1))
 
     ax.set_xlabel("Total arbitrage violations (butterfly + calendar) %")
     ax.set_ylabel("Pooled RMSE vs market price (\\$)")
-    ax.set_title("Stage 1 ablation: pricing accuracy vs. arbitrage consistency")
-    ax.legend(loc="upper left", fontsize=9)
+    ax.set_title("Pricing accuracy vs. arbitrage consistency: full benchmark")
+    ax.legend(loc="upper left", fontsize=8.5, framealpha=0.95)
     fig.savefig(OUT / "fig-arb-rmse-pareto.png")
     plt.close(fig)
 
@@ -271,16 +317,20 @@ def fig_stratified_rmse():
     Visualizes the wing-inversion finding: B10 is the only bar where ATM > OTM.
     """
     mt = _load_master_table()
-    keep = (mt["config"].str.startswith("B")
+    keep = (mt["config"].str.startswith(("B", "S2_"))
             | mt["config"].isin(["BS_A1", "GAM_A2"]))
     sub = mt[keep].copy()
     # Drop rows missing OTM/ATM/ITM (e.g. BS_A1 has only pooled, no strata)
     sub = sub.dropna(subset=["pooled_rmse_otm", "pooled_rmse_atm", "pooled_rmse_itm"])
     sub = sub.reset_index(drop=True)
-    # Tighter labels — drop the verbose suffix
-    sub["short"] = sub["config"].apply(lambda s: (
-        s.split("_")[0] if s.startswith("B") else s.split("_")[0]
-    ))
+
+    def short_label(s):
+        if s.startswith("S2_"):
+            # S2_B10_cvol → "B10/CV", S2_B12_avol → "B12/AV"
+            parts = s.split("_")
+            return f"{parts[1]}/{parts[2][0].upper()}V"
+        return s.split("_")[0]
+    sub["short"] = sub["config"].apply(short_label)
 
     cats   = ["pooled_rmse_otm", "pooled_rmse_atm", "pooled_rmse_itm"]
     labels = ["OTM ($m<0.97$)", "ATM ($0.97 \\leq m \\leq 1.03$)", "ITM ($m>1.03$)"]
@@ -290,7 +340,7 @@ def fig_stratified_rmse():
     x = np.arange(n)
     w = 0.27
 
-    fig, ax = plt.subplots(1, 1, figsize=(11, 4.5))
+    fig, ax = plt.subplots(1, 1, figsize=(13, 4.8))
     for i, (col, lbl, col_color) in enumerate(zip(cats, labels, colors)):
         offset = (i - 1) * w
         ax.bar(x + offset, sub[col], width=w, label=lbl, color=col_color,
@@ -306,7 +356,15 @@ def fig_stratified_rmse():
                 fontstyle="italic", color="#a04040")
 
     ax.set_xticks(x)
-    ax.set_xticklabels(sub["short"], rotation=0, fontsize=9)
+    ax.set_xticklabels(sub["short"], rotation=30, ha="right", fontsize=9)
+    # Visually separate Stage 1 (B*) from Stage 2 (S2_*) blocks
+    s2_start = sub.index[sub["config"].str.startswith("S2_")]
+    if len(s2_start):
+        boundary = float(s2_start[0]) - 0.5
+        ax.axvline(boundary, color="#999", linestyle=":", linewidth=1)
+        ax.text(boundary + 0.05, ax.get_ylim()[1] * 0.94,
+                "Stage 2", fontsize=9, color="#666",
+                fontstyle="italic", ha="left")
     ax.set_ylabel("Pooled RMSE (\\$)")
     ax.set_title("Stratified RMSE by moneyness band")
     ax.legend(loc="upper left", fontsize=9)
@@ -367,11 +425,13 @@ def fig_walkforward_timeline():
     ax.set_xlabel("Calendar date")
     ax.set_title("Walk-forward fold structure")
 
+    # Upper-right is empty (Apr2020 row only has bars on the left); placing
+    # the legend there avoids covering the late-fold (Nov/Dec) bars.
     ax.legend(handles=[
         Patch(color="#cccccc", label="Train"),
         Patch(color="#ff9f3a", label="Validation (1 month)"),
         Patch(color="#d62728", label="Test"),
-    ], loc="lower right", fontsize=9)
+    ], loc="upper right", fontsize=9, framealpha=0.9)
 
     ax.set_xlim(n(data_start) - 5,
                 n(pd.Timestamp("2021-01-01")) + 5)
@@ -380,46 +440,56 @@ def fig_walkforward_timeline():
 
 
 def fig_val_curve_mu_warmup():
-    """Validation RMSE vs epoch for B10/B11/B12 on Nov2020.
+    """Validation RMSE vs epoch for B6 (no warmup) and B10 (warmup) on
+    Nov2020, with the val-best epoch $E^\\star$ marked on each curve.
 
-    Requires history saved in those checkpoints. Existing pre-patch
-    runs/walk_forward/B*/fold_Nov2020.pt files won't have history,
-    so this figure skips gracefully unless the user re-runs B11/B12
-    with --output_dir runs/walk_forward_history.
+    Originally specified to compare μ ablation (B10/B11/B12) under warmup,
+    but only B6 and B10 have post-patch history checkpoints. The current
+    rendering instead shows the stability narrative — the warmup run's
+    val curve is markedly smoother and reaches lower RMSE than the
+    non-warmup run, consistent with the grad-norm dynamics shown in the
+    PDE-dominance figure.
     """
-    runs = [(B10_TAG, "B10 — μ=0.75", "#d62728"),
-            (B11_TAG, "B11 — μ=0.50", "#1f77b4"),
-            (B12_TAG, "B12 — μ=0.25", "#2ca02c")]
-    fig, ax = plt.subplots(figsize=(7.5, 4.5))
+    runs = [
+        (B6_TAG,  "B6 — no warmup",      "#d62728"),
+        (B10_TAG, "B10 — warmup = 5000", "#1f77b4"),
+    ]
+    fig, ax = plt.subplots(figsize=(8.5, 4.8))
     plotted_any = False
 
     for run_tag, label, color in runs:
-        # Try patched dir first, then canonical dir
+        # Try patched-history dir first, then canonical dir
         for parent in (HIST_DIR, WF_DIR):
             h = load_history(parent, run_tag)
             if h is not None and "val_epoch" in h and len(h["val_epoch"]) > 0:
-                ax.plot(h["val_epoch"], h["val_rmse_mkt"],
-                        "o-", label=label, color=color,
-                        markersize=4, alpha=0.9, linewidth=1.2)
+                ax.semilogy(h["val_epoch"], h["val_rmse_mkt"],
+                            "o-", label=label, color=color,
+                            markersize=3.5, alpha=0.9, linewidth=1.2)
                 # Mark E* (val-best)
-                ev = np.argmin(h["val_rmse_mkt"])
+                ev = int(np.argmin(h["val_rmse_mkt"]))
                 ax.scatter([h["val_epoch"][ev]], [h["val_rmse_mkt"][ev]],
-                           s=100, marker="*", color=color, zorder=5,
-                           edgecolor="black", linewidth=0.8)
+                           s=160, marker="*", color=color, zorder=5,
+                           edgecolor="black", linewidth=0.8,
+                           label=f"$E^\\star_{{{label.split(' ')[0]}}} = {h['val_epoch'][ev]:,}$")
                 plotted_any = True
                 break
 
     if not plotted_any:
         raise FileNotFoundError(
-            "No history with val_rmse_mkt found for B10/B11/B12 on Nov2020. "
-            "Re-run those configs with the patched run_walk_forward.py "
-            "(--output_dir runs/walk_forward_history)."
+            "No history with val_rmse_mkt found in runs/walk_forward_history/. "
+            "Run `sbatch slurm/run_history_capture.sh` first."
         )
 
+    # Visualise the warmup window
+    ax.axvspan(0, 5000, color="#1f77b4", alpha=0.06, zorder=0)
+    ax.text(2500, ax.get_ylim()[1] * 0.92, "PDE warmup\n(B10 only)",
+            ha="center", va="top", fontsize=8.5, color="#1f77b4",
+            style="italic")
+
     ax.set_xlabel("Epoch")
-    ax.set_ylabel("Validation RMSE vs market (\\$)")
-    ax.set_title("Validation curves under warmup, μ ablation (Nov 2020)")
-    ax.legend(loc="best", fontsize=9)
+    ax.set_ylabel("Validation RMSE vs market (\\$, log)")
+    ax.set_title("Validation curves on Nov 2020: stability under warmup")
+    ax.legend(loc="upper right", fontsize=8.5, framealpha=0.9, ncol=1)
     fig.savefig(OUT / "fig-val-curve-mu-warmup.png")
     plt.close(fig)
 
@@ -562,17 +632,20 @@ if __name__ == "__main__":
         fig_val_curve_mu_warmup,
         fig_architecture,
     ]
-    n_ok = n_skip = 0
+    n_ok = n_skip = n_err = 0
     for fn in figures:
         try:
             fn()
             print(f"  OK    {fn.__name__}")
             n_ok += 1
         except FileNotFoundError as e:
+            # Missing source data is expected (e.g. before history-capture rerun)
+            # — not an error, just a heads-up.
             print(f"  SKIP  {fn.__name__}: {e}")
             n_skip += 1
         except Exception as e:
             print(f"  ERROR {fn.__name__}: {type(e).__name__}: {e}")
-            n_skip += 1
-    print(f"\n{n_ok} ok, {n_skip} skipped/errored. Output: {OUT}")
-    sys.exit(0 if n_skip == 0 else 1)
+            n_err += 1
+    print(f"\n{n_ok} ok, {n_skip} skipped, {n_err} errored. Output: {OUT}")
+    # Exit non-zero only on a real bug (unhandled exception); skips are fine.
+    sys.exit(0 if n_err == 0 else 1)

@@ -50,6 +50,11 @@ CONFIG_ORDER = [
     "S2_avol",
     "S2_cvol_scratch",
     "S2_avol_scratch",
+    # Stage 2 with explicit warm-start tags
+    "S2_B10_cvol",
+    "S2_B10_avol",
+    "S2_B12_cvol",
+    "S2_B12_avol",
 ]
 
 
@@ -87,6 +92,24 @@ def collect_pinn_runs(runs_dir: Path):
             if r is None:
                 continue
             tag = "S2_" + sub.name
+            found[tag] = r
+
+    # Stage 2 with explicit warm-start: stage2_<warm>/<vol_type>/
+    # e.g. stage2_B10/cvol/results.json → S2_B10_cvol
+    # Skip stage2_smoke_* dirs (1-fold smokes are not full walk-forward results).
+    for s2_dir in sorted(runs_dir.glob("stage2_*")):
+        if not s2_dir.is_dir() or s2_dir.name == "stage2":
+            continue
+        if "smoke" in s2_dir.name:
+            continue
+        warm_tag = s2_dir.name.replace("stage2_", "")     # "B10", "B12", ...
+        for vol_dir in sorted(s2_dir.iterdir()):
+            if not vol_dir.is_dir():
+                continue
+            r = load_json(vol_dir / "results.json")
+            if r is None:
+                continue
+            tag = f"S2_{warm_tag}_{vol_dir.name}"
             found[tag] = r
 
     return found
@@ -223,12 +246,15 @@ def summarize_config(tag: str, results: dict, is_bs: bool = False,
     arch = mode = vol_type = "—"
     mu = np.nan
     if tag.startswith("S2_"):
-        vol_type = tag.split("_")[1]
+        # Two tag schemes:
+        #   S2_cvol            — old (no warm-start label)
+        #   S2_cvol_scratch    — old ablation
+        #   S2_B10_cvol        — new (explicit warm-start)
+        # vol_type is the FIRST token that is "cvol" or "avol".
+        toks = tag.split("_")[1:]
+        vol_type = next((t for t in toks if t in ("cvol", "avol")), "—")
         arch = "modified"
         mode = "hybrid"
-        # μ comes from the run_info's rwf_mu of fold 0 (consistent across folds)
-        if folds:
-            mu = folds[0].get("sigma_fixed", np.nan)  # placeholder; better: read from run_info
         mu_field = s.get("rwf_mu")
         if mu_field is not None:
             mu = mu_field

@@ -17,7 +17,23 @@ python scripts/build_master_table.py >/dev/null
 echo "→ regenerating matplotlib figures…"
 python paper/scripts/generate_figures.py
 
-# 3. (Optional) compile the TikZ vector version of the architecture
+# 3. Cherry-pick Stage 2 vol-surface PNGs the paper references
+echo "→ syncing Stage 2 vol-surface figures…"
+declare -a S2_FIGS=(
+    "stage2_B10/cvol/fold_Nov2020_vol_surface.png:fig-vol-surface-b10-cvol.png"
+    "stage2_B12/cvol/fold_Nov2020_vol_surface.png:fig-vol-surface-b12-cvol.png"
+    "stage2_B10/avol/fold_Nov2020_vol_surface.png:fig-vol-surface-b10-avol.png"
+    "stage2_B12/avol/fold_Nov2020_vol_surface.png:fig-vol-surface-b12-avol.png"
+)
+for entry in "${S2_FIGS[@]}"; do
+    src="runs/${entry%%:*}"
+    dst="paper/figures/${entry##*:}"
+    if [ -f "$src" ]; then
+        cp -f "$src" "$dst"
+    fi
+done
+
+# 4. (Optional) compile the TikZ vector version of the architecture
 #    diagram if pdflatex is on PATH. The matplotlib version (PNG) is
 #    canonical; the TikZ PDF is a higher-fidelity swap-in.
 if command -v pdflatex >/dev/null 2>&1 && [ -f paper/figures/architecture.tex ]; then

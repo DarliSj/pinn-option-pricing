@@ -2,6 +2,16 @@
 
 Quarto source for the PINN-pricing paper.
 
+## Dependencies
+
+```bash
+# One-time, inside the project's Python env:
+pip install tabulate          # pandas.to_markdown() table backend
+```
+
+`pandas`, `numpy`, `matplotlib`, `torch` (the env you already use for
+training) are also required by the figure-generation script.
+
 ## Render
 
 From the project root:

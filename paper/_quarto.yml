@@ -9,6 +9,7 @@ project:
 format:
   pdf:
     documentclass: article
+    pdf-engine: xelatex   # Unicode-friendly — needed for inline σ, μ, τ, em-dashes
     geometry:
       - margin=1in
     fontsize: 11pt
@@ -20,7 +21,6 @@ format:
     fig-cap-location: bottom
     tbl-cap-location: top
     keep-tex: true       # keeps paper.tex alongside paper.pdf for inspection
-    cite-method: biblatex
   html:
     toc: true
     toc-depth: 2
@@ -36,4 +36,7 @@ execute:
   freeze: auto
 
 bibliography: references.bib
-csl: ieee.csl            # if you want a different style, drop a .csl file here
+# Pandoc's built-in citeproc handles citations in BOTH PDF and HTML output.
+# Default style is Chicago author-date — drop a .csl file here (e.g.
+# https://github.com/citation-style-language/styles) and uncomment to switch.
+# csl: ieee.csl

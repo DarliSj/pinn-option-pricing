@@ -14,3 +14,6 @@ _freeze/
 
 # Keep paper.tex (it's useful to inspect; toggle if you'd rather drop it)
 # paper.tex
+
+/.quarto/
+**/*.quarto_ipynb
