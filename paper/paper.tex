@@ -1112,10 +1112,10 @@ start and parametrization.
 \caption{\label{fig-vol-surface-b10-cvol}Learned multiplicative
 volatility surface \(\mu_C(F,\tau)\) for the B10 / C-Vol Stage 2 model
 on the November 2020 fold. The vol network has absorbed substantial
-smile and term structure, with the multiplier ranging \$\sim\$0.5--1.0
-on top of the per-fold \(\sigma_0=0.776\) anchor (right panel),
-producing realised volatilities of roughly 0.39--0.78 across the
-moneyness × maturity grid (left panel).}
+smile and term structure, with the multiplier ranging 0.5--1.0 on top of
+the per-fold \(\sigma_0=0.776\) anchor (right panel), producing realised
+volatilities of roughly 0.39--0.78 across the moneyness × maturity grid
+(left panel).}
 
 \end{figure}%
 
@@ -1335,10 +1335,9 @@ warmup phase are \emph{substitutes}, not complements: lowering \(\mu\)
 inside the warmup regime does not stack a second improvement on top of
 the first.
 
-Stage 2 acts as a pressure valve on the Stage-1 tradeoff by absorbing
-market complexity directly into a learnable volatility surface
-\(\sigma_\theta(F,\tau)\), and the parametrization of that surface
-controls the inductive bias. The multiplicative C-Vol wrapper
+Stage 2 absorbs market complexity directly into a learnable volatility
+surface \(\sigma_\theta(F,\tau)\), and the parametrization of that
+surface controls the inductive bias. The multiplicative C-Vol wrapper
 \(\sigma_0\,\mathrm{softplus}(g_\theta)\), anchored at the per-fold
 ATM-IV median, gives lower RMSE than the additive A-Vol form across both
 warm-starts; A-Vol gives lower arbitrage-violation rates, with B12

@@ -742,7 +742,7 @@ warm-start regimes for Stage 2, and the $2\times 2$ design
 separates the respective contributions of warm start and
 parametrization.
 
-![Learned multiplicative volatility surface $\mu_C(F,\tau)$ for the B10 / C-Vol Stage 2 model on the November 2020 fold. The vol network has absorbed substantial smile and term structure, with the multiplier ranging $\sim$0.5–1.0 on top of the per-fold $\sigma_0=0.776$ anchor (right panel), producing realised volatilities of roughly 0.39–0.78 across the moneyness × maturity grid (left panel).](figures/fig-vol-surface-b10-cvol.png){#fig-vol-surface-b10-cvol width=95%}
+![Learned multiplicative volatility surface $\mu_C(F,\tau)$ for the B10 / C-Vol Stage 2 model on the November 2020 fold. The vol network has absorbed substantial smile and term structure, with the multiplier ranging 0.5–1.0 on top of the per-fold $\sigma_0=0.776$ anchor (right panel), producing realised volatilities of roughly 0.39–0.78 across the moneyness × maturity grid (left panel).](figures/fig-vol-surface-b10-cvol.png){#fig-vol-surface-b10-cvol width=95%}
 
 ![Stage 2 / C-Vol multiplier on the same fold under the cleaner B12 warm-start. The vol network stays essentially inert ($\mu_C \approx 1.000\pm 0.005$, right panel), reflecting that the B12 pricing net already sits close to flat-$\sigma$ Black–Scholes, so the volatility network has little structural correction to add.](figures/fig-vol-surface-b12-cvol.png){#fig-vol-surface-b12-cvol width=95%}
 
