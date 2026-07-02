@@ -382,6 +382,10 @@ def main():
                     help="GAM baseline output directory (A2)")
     ap.add_argument("--lagp_dir", default="results/lagp_baseline",
                     help="laGP baseline output directory (A3)")
+    ap.add_argument("--label", default="",
+                    help="Methodology label (e.g. 'v1', 'v2'). When set, adds a "
+                         "'methodology' column so tables from different roots are "
+                         "self-identifying and can be concatenated for comparison.")
     ap.add_argument("--output_dir", default="reports",
                     help="Where to write master_table.csv / .md / per_fold_table.csv")
     args = ap.parse_args()
@@ -422,6 +426,8 @@ def main():
         per_fold_rows.extend(build_per_fold_rows(tag, r, is_bs=is_bs))
 
     df = pd.DataFrame(rows)
+    if args.label:
+        df.insert(1, "methodology", args.label)
 
     # Ordered display
     df["_order"] = df["config"].apply(
@@ -439,6 +445,8 @@ def main():
     print(f"Wrote {md_path}")
 
     pf = pd.DataFrame(per_fold_rows)
+    if args.label:
+        pf.insert(1, "methodology", args.label)
     pf_path = out_dir / "per_fold_table.csv"
     pf.to_csv(pf_path, index=False)
     print(f"Wrote {pf_path}  ({len(pf)} fold rows)")

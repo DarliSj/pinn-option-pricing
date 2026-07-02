@@ -29,6 +29,12 @@ cd /hpc/group/fisherlab/ds555/pinn_code
 source /hpc/group/fisherlab/ds555/miniconda3/etc/profile.d/conda.sh
 conda activate pinn_env
 
+# ── Output routing (methodology versioning; see EXPERIMENTS.md) ──
+# Default RUN_ROOT=runs reproduces FROZEN v1. Warm-start is read from the
+# SAME root so v2 Stage 2 warm-starts off v2 Stage 1 (consistent methodology):
+#   RUN_ROOT=runs/v2 sbatch --array=0-3 slurm/run_stage2.sh
+RUN_ROOT="${RUN_ROOT:-runs}"
+
 # ── 4-task config lookup ──────────────────────────────────
 # Rows: [STAGE1_DIR, STAGE1_MU, VOL_TYPE, OUTPUT_TAG]
 STAGE1_DIRS=(
@@ -61,14 +67,14 @@ echo "============================================"
 # ── Run ────────────────────────────────────────────────────
 python run_stage2.py \
     --vol_type $VOL_TYPE \
-    --checkpoint_dir runs/walk_forward/$STAGE1_DIR \
+    --checkpoint_dir ${RUN_ROOT}/walk_forward/$STAGE1_DIR \
     --rwf_mu $STAGE1_MU \
     --pricing_lr 1e-4 \
     --vol_lr 1e-3 \
     --epochs 10000 \
     --val_months 1 \
     --seed 42 \
-    --output_dir runs/$OUTPUT_TAG
+    --output_dir ${RUN_ROOT}/$OUTPUT_TAG
 
 echo "============================================"
 echo "Done: $(date)"

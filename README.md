@@ -6,7 +6,12 @@ methods for European option pricing under a strict walk-forward
 protocol. The full methodology, results, and discussion are described
 in the paper (`paper/paper.qmd`). This README documents the codebase
 itself: what each stage does, how to reproduce the numbers, and where
-the artefacts land. For more info, look at `README_dev.md`
+the artefacts land. For developer-level detail, see `README_dev.md`.
+
+> **Research status:** the benchmark snapshot below is complete and matches the
+> paper. Active methodology work (loss-balancer replacement, selection-protocol
+> revision, arbitrage-as-objective) is tracked in `docs/TODO.md` and
+> `docs/HYBRID_PARETO_PLAN.md`; those results are not yet reflected here.
 
 ## Overview
 

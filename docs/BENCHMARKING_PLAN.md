@@ -1,5 +1,10 @@
 # Pre-Stage 2: Walk-Forward Benchmark Plan
 
+> **STATUS: HISTORICAL (Apr 2026) — completed and superseded.** The benchmark
+> was executed and extended well beyond this plan (final grid: B0–B12 plus the
+> Stage 2 2×2; results in `reports/master_table.csv`). Kept for provenance.
+> Current plan of record: `docs/HYBRID_PARETO_PLAN.md`.
+
 **Purpose:** Establish proper walk-forward benchmarks for ALL models before
 implementing learnable volatility. The single Nov–Dec split was used to develop
 the architecture; these 9-fold results are the real evaluation.

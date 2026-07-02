@@ -1,5 +1,13 @@
 # PINN Option Pricing — Technical Briefing for Claude Code
 
+> **STATUS: HISTORICAL (Apr 2026) — superseded.** Kept for provenance only.
+> Two known mismatches with the current repo: (1) the config numbering here
+> (B1–B5) predates the final **B0–B12** grid in `reports/master_table.csv` and
+> does NOT map onto it; (2) the "report final-epoch, never best-epoch" rule was
+> later replaced by val-best snapshotting, which is itself being retired (see
+> `docs/TODO.md` W3). For current state and plan read `docs/TODO.md`,
+> `docs/HYBRID_PARETO_PLAN.md`, and `docs/TRAINING_VALIDATION_DISCUSSION.md`.
+
 ## Document Purpose
 This is the complete technical context for continuing development in Claude Code CLI.
 It summarizes all decisions, code, math, experiments, and findings from the claude.ai sessions.

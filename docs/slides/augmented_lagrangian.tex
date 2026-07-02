@@ -1,0 +1,141 @@
+% Augmented Lagrangian for hybrid PINN training — advisor slides
+% Compile:  pdflatex augmented_lagrangian.tex   (run twice)
+%       or: open in Overleaf
+\documentclass[aspectratio=169,11pt]{beamer}
+\usetheme{Madrid}
+\usecolortheme{seahorse}
+\setbeamertemplate{navigation symbols}{}
+\setbeamertemplate{footline}[frame number]
+
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+
+\newcommand{\Ldata}{\mathcal{L}_{\text{data}}}
+\newcommand{\vhat}{\hat{v}}
+
+\title[Augmented Lagrangian for PINNs]{Why an Augmented Lagrangian for our PINN training}
+\subtitle{Fixing loss-balancing drift at the source}
+\author{PINN Option-Pricing project}
+\date{\today}
+
+\begin{document}
+
+\begin{frame}
+  \titlepage
+\end{frame}
+
+% ---------------------------------------------------------------
+\begin{frame}{1. The problem: our loss is a ``penalty method''}
+  Today we minimise a \textbf{weighted sum} with auto-tuned weights (grad-norm):
+  \[
+    \mathcal{L} \;=\; \lambda_{\text{pde}}\mathcal{L}_{\text{pde}}
+      + \lambda_{\text{tc}}\mathcal{L}_{\text{tc}}
+      + \lambda_{\text{bc}}\mathcal{L}_{\text{bc}}
+      + \lambda_{\text{data}}\Ldata .
+  \]
+  In optimisation terms this is the \alert{penalty method} for a constrained problem.
+
+  \begin{block}{Its built-in flaw}
+    To truly \emph{enforce} a term you must send its weight $\to\infty$; large
+    weights make the optimisation stiff and unstable.
+  \end{block}
+
+  \begin{exampleblock}{What we observe}
+    $\lambda_{\text{data}}$ runs away to ${\sim}10^{5}$, training drifts:
+    physics-only RMSE $\$8.76 \rightarrow$ hybrid $\$10$+, and no-arbitrage
+    violations explode. The weights never settle.
+  \end{exampleblock}
+\end{frame}
+
+% ---------------------------------------------------------------
+\begin{frame}{2. Reframe: it is really a \emph{constrained} problem}
+  We don't want a blend of physics and data. We want:
+  \begin{quote}
+    \textbf{minimise the market-data misfit \emph{subject to} obeying the
+    Black--Scholes PDE, the boundary/terminal conditions, and no-arbitrage.}
+  \end{quote}
+  \[
+  \begin{aligned}
+    \min_{\theta}\quad & \Ldata(\theta) &&\text{\small(objective: fit the market)}\\
+    \text{s.t.}\quad
+      & \mathcal{L}_{\text{pde}}(\theta)=0,\;
+        \mathcal{L}_{\text{tc}}(\theta)=0,\;
+        \mathcal{L}_{\text{bc}}(\theta)=0 &&\text{\small(equality constraints)}\\
+      & \underbrace{\mathrm{ReLU}(-\partial^2_{mm}\vhat)}_{\text{butterfly}}\le 0,\;
+        \underbrace{\mathrm{ReLU}(-\partial_{\tau}\vhat)}_{\text{calendar}}\le 0
+        &&\text{\small(no-arbitrage)}
+  \end{aligned}
+  \]
+  \begin{block}{The key shift}
+    Data is the \textbf{objective}; physics and no-arbitrage are \textbf{constraints}.
+    The weighted sum throws this structure away by treating them as co-equal losses.
+  \end{block}
+\end{frame}
+
+% ---------------------------------------------------------------
+\begin{frame}{3. What the Augmented Lagrangian does}
+  Introduce a \alert{multiplier} $\mu_k$ per constraint $c_k$ and add a penalty:
+  \[
+    \mathcal{L}_{A}(\theta,\mu;\rho)=\Ldata(\theta)
+      \;+\;\sum_k \mu_k\,c_k(\theta)
+      \;+\;\tfrac{\rho}{2}\sum_k c_k(\theta)^2 .
+  \]
+  Alternate two cheap steps:
+  \begin{itemize}
+    \item descend on $\theta$ (a few gradient steps);
+    \item update multipliers \;$\mu_k \leftarrow \mu_k + \rho\,c_k$\;
+          \big(inequalities: $\mu_k \leftarrow \max(0,\ \mu_k+\rho\,c_k)$\big).
+  \end{itemize}
+
+  \begin{block}{Why it cures the drift}
+    The multiplier \textbf{accumulates the violation} and does the job that
+    $\rho\to\infty$ would do --- but with a \textbf{fixed, moderate} $\rho$.
+    It is \alert{self-limiting}: once $c_k\!\approx\!0$ the update adds ${\approx}0$,
+    so $\mu_k$ stops growing. No runaway, by construction.
+  \end{block}
+
+  \centering\small
+  \emph{Analogy:} penalty method $=$ ever-larger fines until compliance
+  ($\to\infty$); \quad augmented Lagrangian $=$ a \textbf{thermostat} that settles
+  at exactly the pressure needed, then holds.
+\end{frame}
+
+% ---------------------------------------------------------------
+\begin{frame}{4. What it enables for us}
+  \begin{columns}[T]
+    \begin{column}{0.54\textwidth}
+      \begin{itemize}
+        \item \textbf{Fixes drift at the source} $\Rightarrow$ trajectory
+              converges $\Rightarrow$ final-epoch reliable $\Rightarrow$
+              \emph{we can drop the validation set} and grow the training window.
+        \item \textbf{Encodes the right structure}: physics \& no-arbitrage are
+              constraints, data is the objective.
+        \item \textbf{Unifies no-arbitrage}: just another inequality constraint,
+              active only where violated --- self-modulating.
+        \item \textbf{Scales to Stage 2}: $\sigma$-regularisation and the second
+              network are simply more constraints.
+      \end{itemize}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \footnotesize
+      \begin{tabular}{@{}ll@{}}
+        \toprule
+        & uses \\
+        \midrule
+        current grad-norm & per-term gradient \emph{norms} \\
+        augmented Lagrangian & constraint \emph{values} \\
+        \bottomrule
+      \end{tabular}
+      \vspace{0.4em}
+      \begin{block}{\footnotesize Cost}
+        \footnotesize One robust knob $\rho$. Multiplier updates use constraint
+        \emph{values}, not per-term gradients --- so it is \textbf{cheaper and more
+        stable} than what we run now.
+      \end{block}
+      \scriptsize PINN precedent: PECANN (Basir \& Senocak, 2022); AL-PINN
+      (Son et al., 2022). Method: Hestenes \& Powell, 1969.
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\end{document}

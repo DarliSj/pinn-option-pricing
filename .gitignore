@@ -12,7 +12,13 @@ runs/stage2/
 runs/smoke/
 runs/stage2_smoke/
 
-# Keep everything in runs/walk_forward/ and checkpoints/ (all small)
+# v2 methodology tree (see EXPERIMENTS.md) — mirror the v1 policy:
+# keep walk_forward/ and stage2_* results (small); ignore smoke/transient.
+runs/v2/smoke/
+runs/v2/stage2/
+runs/v2/stage2_smoke/
+
+# Keep everything in runs/walk_forward/ (v1 + v2) and checkpoints/ (all small)
 
 # macOS
 .DS_Store

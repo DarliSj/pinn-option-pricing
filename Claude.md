@@ -25,45 +25,86 @@ just prescriptive solutions.
 - Never conflate model error with numerical error
 
 
-## Context
-Read `docs/CLAUDE_CODE_BRIEFING.md` for the complete technical briefing
-covering all architectural decisions, experimental results, and rationale.
-This is the authoritative project context document.
+## Context — read these, in this order
+- `docs/TODO.md` — current status + active workstreams (W0–W7). Start here.
+- `docs/HYBRID_PARETO_PLAN.md` — plan of record (§0 locked decisions, §4 sequencing).
+- `docs/TRAINING_VALIDATION_DISCUSSION.md` — advisor-facing analysis of the
+  training/validation defects (P1–P5); Appendix A = augmented-Lagrangian primer,
+  Appendix B = loss-balancing literature survey.
+- `docs/README.md` — index of all docs with current-vs-historical status.
+- ⚠ `docs/CLAUDE_CODE_BRIEFING.md` is HISTORICAL (Apr 2026): its B1–B5 config
+  numbering does NOT match the final B0–B12 grid, and its methodology rules have
+  been superseded. Do not use it for current state.
 
 ## Key Reference Documents
 The `references/` folder contains the research papers informing this project.
 The most important ones:
 - `AN_EXPERT_S_GUIDE_TO_TRAINING_PHYSICSINFORMED_NEURAL_NETWORKS.pdf` — Wang et al.
-  Our primary reference for Modified MLP, RWF, Fourier features, grad-norm balancing.
-  Read §4.3 (RWF), §6.4 (Modified MLP), §5.2 (loss balancing) when architecture
-  questions arise.
+  Our primary reference for Modified MLP (§6.4), RWF (§4.3), Fourier features,
+  grad-norm balancing (§5.2).
 - `Uncertainity_Aware_Pinn_for_Option_Pricing.pdf` — Kazemian et al.
   Reference for Stage 3 anchored ensembles and UQ.
 - `Methodology___Framework_proposal2.pdf` — Our framework proposal with the
   4-combination design (AA/AC/CA/CC) for volatility + UQ.
 
-## Project State
-- Stage 0 physics mode: WORKING. Modified MLP + RWF + Fourier features.
-  μ=0.75 run in progress. μ=1.0 confirmed stable (no drift, RMSE 0.010 @ 10k epochs).
-- Next step: hybrid mode (add market data loss), then Stage 1 walk-forward.
+## Project State (2026-06-03)
+- Stages 0–2 COMPLETE and benchmarked: 9-fold walk-forward (Apr–Dec 2020),
+  B0–B12 ablation grid, Stage 2 2×2 (B10/B12 warm-starts × C-Vol/A-Vol), plus
+  BS/GAM/laGP baselines. Results: `reports/master_table.csv`.
+- The headline gap: NO model both beats BS on RMSE and is arbitrage-clean.
+  B10 = $8.49 pooled but 32%/19% butterfly/calendar violations; S2-B12/A-Vol =
+  8.2%/0.3% violations but $9.41.
+- Root defects identified (evidence in `docs/TRAINING_VALIDATION_DISCUSSION.md`):
+  1. The grad-norm balancer is unbounded → λ_data runaway (~10⁵), weights never
+     converge (numerical error).
+  2. Per-fold val-best argmin selection is high-variance and unfair — the config
+     ranking flips with the selection rule (protocol error).
+  3. Arbitrage is measured but never trained against; even physics-only runs
+     violate it (38% butterfly at μ=1.0) — MSE residual ≠ pointwise convexity.
+  4. Constant-σ physics ⟂ smile data (model error — Stage 2's job to fix).
+  5. Pooled RMSE and violation *rates* hide fold outliers and severity blow-ups.
+- Active workstream (docs/TODO.md): W0 instrument → W1 balancer fix (ReLoBRaLo
+  cheap test vs augmented-Lagrangian target) → W2 architecture μ-gate → W3
+  protocol lock (retire argmin; drop val if convergence verified) → W4 arbitrage
+  objective → W5/W6 re-sweeps → W7 re-baseline.
+- Locked decisions: balancer first; mean-fold RMSE + MAE primary (pooled
+  secondary); μ re-selected on arbitrage + RMSE jointly; prediction-averaging
+  only (never weight-SWA); ICNN hard constraints = fallback only.
 
 ## Code Conventions
-- PyTorch only. All code lives in `stage0_pinn.ipynb`.
-- Always use `RWFLinear` instead of `nn.Linear`.
-- Always use Modified MLP architecture (encoders U, V with gating at every layer).
-- Always use Fourier feature embedding as input layer.
-- Always include grad-norm adaptive loss balancing with weight floor of 10 on TC/BC.
-- Activation: tanh everywhere (required for PDE second derivatives via autodiff).
-- Non-dimensionalized coordinates: m = S/K, τ = T-t, v̂ = V/K.
-- Data source: `TSLA_2020_Split_Adjusted.csv` in project root.
+- PyTorch. Reusable code in `src/`; entry points `run_stage0.py`,
+  `run_walk_forward.py`, `run_stage2.py`, `run_bs_baseline.py`; aggregation and
+  R baselines in `scripts/`; manuscript in `paper/` (Quarto).
+- Data: `data/TSLA_2020_Split_Adjusted.csv`.
+- Non-dimensionalized coordinates: m = F/K, τ = T−t, v̂ = V/K. Activation: tanh
+  everywhere (required for PDE second derivatives via autodiff).
+- Pricing-net default: Modified MLP + RWF (`RWFLinear`) + Fourier features. The
+  standard MLP (`StandardPricingNet`) is a maintained, *scored control* — keep
+  both working; do not remove either.
+- Loss balancing: current runs use Wang grad-norm (TC/BC floor 10). It is UNDER
+  REPLACEMENT (workstream W1) — do not build new features that assume it. Put
+  new balancers/penalties behind CLI flags so completed runs stay reproducible.
+- Test data is sacred: each test month is evaluated exactly once per fold;
+  `track_test_curve` is diagnostic-only, never for selection.
+- **Output versioning (see `EXPERIMENTS.md`):** the current results are the
+  FROZEN v1 baseline (`runs/walk_forward/`, `runs/stage2_*/`, `reports/v1/`).
+  All new-methodology runs go to a SEPARATE tree — `RUN_ROOT=runs/v2 sbatch …`
+  or `--output_dir runs/v2/…`. Never write new runs into the default `runs/`
+  tree (it would mix methodologies in the master table); never overwrite
+  `reports/v1/`. Baselines (BS/GAM/laGP) are methodology-independent and reused.
 
 ## Diagnostic Requirements
 When training any model, always produce:
-1. Per-loss curves (log scale) + adaptive weight trajectories
+1. Per-loss curves (log scale) + weight/multiplier trajectories — check for a
+   PLATEAU (the convergence acceptance test for the balancer fix)
 2. PDE dominance ratio: λ_pde·L_pde / (λ_tc·L_tc + λ_bc·L_bc)
-3. Validation RMSE vs BS (norm) and vs Market ($) at regular intervals
-4. Solution surface contour: PINN vs analytical BS vs error
-5. Test set scatter plot with RMSE/MAE annotation
+3. Validation/test RMSE curves per the active protocol
+4. Arbitrage rate AND severity (integrated negative part, worst-case slope) —
+   rates alone hide the local blow-ups
+5. Solution surface contour: PINN vs analytical BS vs error; test scatter with
+   RMSE/MAE annotation
+
+Reporting: mean-fold RMSE + MAE primary; pooled RMSE secondary.
 
 ## Style
 - Targeted code chunks over full file regeneration

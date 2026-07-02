@@ -46,6 +46,12 @@ cd /hpc/group/fisherlab/ds555/pinn_code
 source /hpc/group/fisherlab/ds555/miniconda3/etc/profile.d/conda.sh
 conda activate pinn_env
 
+# ── Output routing (methodology versioning; see EXPERIMENTS.md) ──
+# Default RUN_ROOT=runs reproduces the FROZEN v1 layout exactly.
+# For the new methodology, route everything to a separate tree:
+#   RUN_ROOT=runs/v2 sbatch --array=0-12 slurm/run_benchmark.sh
+RUN_ROOT="${RUN_ROOT:-runs}"
+
 echo "============================================"
 echo "Job ID:     $SLURM_JOB_ID"
 echo "Array task: $SLURM_ARRAY_TASK_ID"
@@ -85,7 +91,7 @@ python run_walk_forward.py \
     --epochs 15000 \
     --val_months 1 \
     --seed 42 \
-    --output_dir runs/walk_forward \
+    --output_dir ${RUN_ROOT}/walk_forward \
     $EXTRA
 
 echo "============================================"

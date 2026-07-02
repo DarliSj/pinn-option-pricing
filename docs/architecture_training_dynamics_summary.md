@@ -1,5 +1,12 @@
 # Architecture & Training Dynamics: Modified MLP, RWF, and the μ Parameter
 
+> **STATUS: HISTORICAL (Stage 0 analysis) — partially superseded.** The drift
+> diagnosis (BC/TC gradient vanishing in the standard MLP) remains valid. The
+> μ-selection conclusion does NOT: "μ=1.0 for stability" was later found to be
+> the **worst** setting for no-arbitrage (physics-mode butterfly violations:
+> 38% at μ=1.0 vs 3.7% for the standard MLP). μ is now re-selected on
+> arbitrage + RMSE jointly — see `docs/HYBRID_PARETO_PLAN.md` §2-B.
+
 ## PINN Option Pricing Research — Session Summary
 
 ---
