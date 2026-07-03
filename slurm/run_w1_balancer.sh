@@ -25,10 +25,13 @@
 #   (RUN_ROOT defaults to runs/v2 here anyway — this script never
 #    writes into the v1 tree.)
 #
-# Smoke first (1 fold, short):
+# Smoke first — use the orchestrator (smoke gates the array):
+#   bash slurm/submit_w1.sh
+# or a one-off smoke by hand (gitignored transient dir):
 #   python run_walk_forward.py --mode hybrid --arch modified \
 #       --rwf_mu 0.75 --balancer relobralo --folds Nov2020 \
-#       --epochs 800 --output_dir runs/v2/_smoke_w1 --track_test_curve
+#       --epochs 1500 --data_loss_warmup 200 \
+#       --output_dir runs/v2/smoke --track_test_curve
 #
 # ACCEPTANCE (per docs/TODO.md W1): weight trajectories PLATEAU
 # (no λ runaway), and hybrid test RMSE stops degrading vs the
