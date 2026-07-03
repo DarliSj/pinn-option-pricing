@@ -65,6 +65,19 @@ def load_json(path: Path):
         return json.load(f)
 
 
+def _fold_mean(folds, key):
+    """Mean of a per-fold field, None-safe (returns NaN when absent).
+
+    Lets new metrics (medape_mkt, arb_*_int_neg — added for v2) degrade
+    gracefully on v1 results.json files that predate them.
+    """
+    vals = [f.get(key) for f in folds]
+    vals = [float(v) for v in vals if v is not None]
+    if not vals:
+        return np.nan
+    return float(np.mean(vals))
+
+
 def collect_pinn_runs(runs_dir: Path):
     """Find every results.json under runs/walk_forward and runs/stage2."""
     found = {}
@@ -143,7 +156,10 @@ def _tag_from_walk_forward_dir(dirname: str) -> str:
         "modified_hybrid_mu0.5_warmup5000":            "B11",
         "modified_hybrid_mu0.25_warmup5000":           "B12",
     }
-    prefix = mapping.get(dirname, "B?")
+    # Unmapped dirs (e.g. v2 balancer variants like
+    # modified_hybrid_mu0.75_warmup5000_relobralo) get a generic "V2"
+    # prefix so the tag parser downstream still sees arch at parts[1].
+    prefix = mapping.get(dirname, "V2")
     return f"{prefix}_{dirname}"
 
 
@@ -189,6 +205,7 @@ def summarize_config(tag: str, results: dict, is_bs: bool = False,
 
     if is_bs:
         # BS baseline schema is leaner — no e_star, no arb metrics
+        mean_fold_mae = _fold_mean(folds, "mae_mkt")
         row.update({
             "arch":             "BS",
             "mode":             "—",
@@ -202,6 +219,9 @@ def summarize_config(tag: str, results: dict, is_bs: bool = False,
             "pooled_rmse_itm":    np.nan,
             "pooled_rmse_wing":   np.nan,
             "mean_fold_rmse":   s.get("mean_rmse_mkt"),
+            "mean_fold_mae":    mean_fold_mae,
+            "rmse_mae_gap":     _gap(s.get("mean_rmse_mkt"), mean_fold_mae),
+            "medape%":          np.nan,
             "std_fold_rmse":    s.get("std_rmse_mkt"),
             "worst_rmse":       np.nan,
             "worst_fold":       "—",
@@ -209,6 +229,8 @@ def summarize_config(tag: str, results: dict, is_bs: bool = False,
             "e_star_std":       np.nan,
             "arb_butterfly%":   np.nan,
             "arb_calendar%":    np.nan,
+            "arb_bfly_sev":     np.nan,
+            "arb_cal_sev":      np.nan,
             "n_folds":          len(folds),
             "n_test_total":     s.get("total_n_test"),
         })
@@ -217,6 +239,7 @@ def summarize_config(tag: str, results: dict, is_bs: bool = False,
     if is_regression:
         # GAM / laGP — stratified metrics, no PINN-specific fields
         method = "GAM" if tag.startswith("GAM") else "laGP" if tag.startswith("LAGP") else "—"
+        mean_fold_mae = _fold_mean(folds, "mae_mkt")
         row.update({
             "arch":             method,
             "mode":             "residual",   # learns BS residual
@@ -230,6 +253,9 @@ def summarize_config(tag: str, results: dict, is_bs: bool = False,
             "pooled_rmse_itm":    s.get("pooled_rmse_itm"),
             "pooled_rmse_wing":   _compute_pooled_wing_rmse(folds),
             "mean_fold_rmse":   s.get("mean_rmse_mkt"),
+            "mean_fold_mae":    mean_fold_mae,
+            "rmse_mae_gap":     _gap(s.get("mean_rmse_mkt"), mean_fold_mae),
+            "medape%":          np.nan,
             "std_fold_rmse":    s.get("std_rmse_mkt"),
             "worst_rmse":       s.get("worst_rmse_mkt"),
             "worst_fold":       s.get("worst_fold"),
@@ -237,6 +263,8 @@ def summarize_config(tag: str, results: dict, is_bs: bool = False,
             "e_star_std":       np.nan,
             "arb_butterfly%":   np.nan,
             "arb_calendar%":    np.nan,
+            "arb_bfly_sev":     np.nan,
+            "arb_cal_sev":      np.nan,
             "n_folds":          len(folds),
             "n_test_total":     s.get("total_n_test"),
         })
@@ -273,6 +301,9 @@ def summarize_config(tag: str, results: dict, is_bs: bool = False,
                 except ValueError:
                     pass
 
+    mean_fold_mae = (s.get("mean_mae_mkt")
+                     if s.get("mean_mae_mkt") is not None
+                     else _fold_mean(folds, "mae_mkt"))
     row.update({
         "arch":             arch,
         "mode":             mode,
@@ -286,6 +317,9 @@ def summarize_config(tag: str, results: dict, is_bs: bool = False,
         "pooled_rmse_itm":    s.get("pooled_rmse_itm"),
         "pooled_rmse_wing":   _compute_pooled_wing_rmse(folds),
         "mean_fold_rmse":   s.get("mean_rmse_mkt"),
+        "mean_fold_mae":    mean_fold_mae,
+        "rmse_mae_gap":     _gap(s.get("mean_rmse_mkt"), mean_fold_mae),
+        "medape%":          _pct(_fold_mean(folds, "medape_mkt")),
         "std_fold_rmse":    s.get("std_rmse_mkt"),
         "worst_rmse":       s.get("worst_rmse_mkt"),
         "worst_fold":       s.get("worst_fold"),
@@ -293,6 +327,14 @@ def summarize_config(tag: str, results: dict, is_bs: bool = False,
         "e_star_std":       s.get("e_star_std"),
         "arb_butterfly%":   _pct(s.get("mean_arb_butterfly_ratio")),
         "arb_calendar%":    _pct(s.get("mean_arb_calendar_ratio")),
+        # Severity (integrated negative part). Summary key exists for v2
+        # runs; per-fold fallback covers reruns; NaN for v1.
+        "arb_bfly_sev":     (s.get("mean_arb_butterfly_int_neg")
+                             if s.get("mean_arb_butterfly_int_neg") is not None
+                             else _fold_mean(folds, "arb_butterfly_int_neg")),
+        "arb_cal_sev":      (s.get("mean_arb_calendar_int_neg")
+                             if s.get("mean_arb_calendar_int_neg") is not None
+                             else _fold_mean(folds, "arb_calendar_int_neg")),
         "n_folds":          len(folds),
         "n_test_total":     s.get("total_n_test"),
     })
@@ -301,6 +343,17 @@ def summarize_config(tag: str, results: dict, is_bs: bool = False,
 
 def _pct(x):
     return None if x is None else round(100.0 * x, 2)
+
+
+def _gap(rmse, mae):
+    """mean-fold RMSE − MAE: tail diagnostic (widens where squared error is
+    dominated by a few large wing/arbitrage blow-ups)."""
+    if rmse is None or mae is None:
+        return np.nan
+    try:
+        return float(rmse) - float(mae)
+    except (TypeError, ValueError):
+        return np.nan
 
 
 def build_per_fold_rows(tag: str, results: dict, is_bs: bool = False):
@@ -328,6 +381,8 @@ def build_per_fold_rows(tag: str, results: dict, is_bs: bool = False):
                 rmse_wing = None
             row.update({
                 "rmse_mkt":     f.get("rmse_mkt"),
+                "mae_mkt":      f.get("mae_mkt"),
+                "medape_mkt":   f.get("medape_mkt"),
                 "rmse_spread":  f.get("rmse_spread"),
                 "rmse_otm":     f.get("rmse_otm"),
                 "rmse_atm":     f.get("rmse_atm"),
@@ -338,6 +393,10 @@ def build_per_fold_rows(tag: str, results: dict, is_bs: bool = False):
                 "best_val_epoch": f.get("best_val_epoch"),
                 "arb_butterfly%": _pct(f.get("arb_butterfly_ratio")),
                 "arb_calendar%":  _pct(f.get("arb_calendar_ratio")),
+                "arb_bfly_sev":   f.get("arb_butterfly_int_neg"),
+                "arb_cal_sev":    f.get("arb_calendar_int_neg"),
+                "arb_bfly_max_neg": f.get("arb_butterfly_max_neg"),
+                "arb_cal_max_neg":  f.get("arb_calendar_max_neg"),
                 "elapsed_s":    f.get("elapsed"),
             })
         rows.append(row)
@@ -349,10 +408,12 @@ def to_markdown_short(df: pd.DataFrame) -> str:
 
     Uses a hand-rolled GFM writer (no `tabulate` dependency).
     """
-    cols = ["config", "pooled_rmse", "mean_fold_rmse", "std_fold_rmse",
+    # Mean-fold metrics lead (primary per plan §0); pooled is secondary.
+    cols = ["config", "mean_fold_rmse", "mean_fold_mae", "std_fold_rmse",
+            "rmse_mae_gap", "medape%",
+            "arb_butterfly%", "arb_calendar%", "arb_bfly_sev", "arb_cal_sev",
+            "pooled_rmse",
             "pooled_rmse_otm", "pooled_rmse_atm", "pooled_rmse_itm",
-            "pooled_rmse_wing",
-            "pooled_rmse_spread", "arb_butterfly%", "arb_calendar%",
             "e_star_mean"]
     cols = [c for c in cols if c in df.columns]
     sub = df[cols].copy()
@@ -434,6 +495,25 @@ def main():
         lambda c: CONFIG_ORDER.index(c) if c in CONFIG_ORDER else 999
     )
     df = df.sort_values("_order").drop(columns=["_order"]).reset_index(drop=True)
+
+    # Column order: mean-fold metrics are PRIMARY (plan §0 decision —
+    # robust to fold-size heterogeneity), pooled secondary; severity next
+    # to the rates it contextualizes. Unknown columns keep their position
+    # at the end.
+    preferred = [
+        "config", "methodology", "arch", "mode", "mu", "vol_type",
+        "mean_fold_rmse", "mean_fold_mae", "std_fold_rmse",
+        "rmse_mae_gap", "medape%",
+        "arb_butterfly%", "arb_calendar%", "arb_bfly_sev", "arb_cal_sev",
+        "pooled_rmse", "pooled_mae", "pooled_rmse_spread",
+        "pooled_rmse_otm", "pooled_rmse_atm", "pooled_rmse_itm",
+        "pooled_rmse_wing",
+        "worst_rmse", "worst_fold", "e_star_mean", "e_star_std",
+        "n_folds", "n_test_total",
+    ]
+    ordered = ([c for c in preferred if c in df.columns]
+               + [c for c in df.columns if c not in preferred])
+    df = df[ordered]
 
     # ── Write outputs ───────────────────────────────────────────
     csv_path = out_dir / "master_table.csv"

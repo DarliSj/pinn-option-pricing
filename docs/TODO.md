@@ -74,26 +74,41 @@ first). Advisor analysis: `TRAINING_VALIDATION_DISCUSSION.md`.
 - [x] **Output versioning in place** (`EXPERIMENTS.md`): v1 frozen
       (`reports/v1/`); v2 routed via `RUN_ROOT=runs/v2`; `compare_methodologies.py`
       diffs them. All W1+ runs use the v2 tree.
-- [ ] Arbitrage **severity** metrics in diagnostics + master table:
-      `∫ relu(−v̂_mm)`, `∫ relu(−v̂_τ)`, dollar-butterfly (rate + max-neg alone
-      hide the −100s blow-ups).
-- [ ] Wire `track_test_curve` as a CLI flag (diagnostic only — never selection).
-- [ ] **Gradient-alignment score** between ∇L_data and ∇L_pde (is the conflict
-      directional as well as magnitude? decides if gradient-surgery is needed).
-- [ ] σ_θ-vs-market-IV overlay for Nov/Dec (is Stage 2 learning real vol?).
-- [ ] Physics-vs-analytic-BS fidelity audit on existing checkpoints (how much of
-      B4's 38%/21% is removable optimization error vs structural?).
-- [ ] Reporting switch: **mean-fold RMSE + MAE** primary; RMSE−MAE gap; MAPE;
-      pooled → appendix.
+- [x] Arbitrage **severity** metrics: `butterfly_int_neg` / `calendar_int_neg`
+      (mean integrated negative part) added to `compute_arbitrage_ratios`,
+      per-fold results, summaries, and master-table columns
+      (`arb_bfly_sev`/`arb_cal_sev`; NaN for v1 — backfill via
+      `scripts/audit_physics_fidelity.py --folds all`). Dollar-scale variant
+      deferred to the fidelity audit (needs strike context).
+- [x] `track_test_curve` exposed as `--track_test_curve` in
+      `run_walk_forward.py` + `run_stage2.py` (diagnostic only — never selection).
+- [x] **Gradient-alignment score** cos(∇L_data, ∇L_pde) logged to
+      `history["grad_align_data_pde"]` at balancer cadence (all balancers).
+- [ ] σ_θ-vs-market-IV overlay — **script ready**
+      (`scripts/overlay_vol_surface.py`, all 4 Stage 2 cells × Nov/Dec);
+      RUN ON DCC in pinn_env.
+- [ ] Physics-vs-analytic-BS fidelity audit — **script ready**
+      (`scripts/audit_physics_fidelity.py`, incl. analytic-surface
+      finite-diff noise floor); RUN ON DCC in pinn_env.
+- [x] Reporting switch: master table now leads with **mean-fold RMSE + MAE**,
+      adds `rmse_mae_gap` + `medape%` (medAPE recorded by `validate()` for
+      new runs; NaN for v1); pooled demoted to secondary columns.
 
 ### W1 — Balancer fix (the source; blocks everything downstream)
 - [ ] Cheap falsification: **ReLoBRaLo** drop-in + Σλ-renormalization control on
-      B6/B10, 2–3 folds. Acceptance: weights plateau, no runaway, hybrid stops
+      B6/B10, 3 folds. Acceptance: weights plateau, no runaway, hybrid stops
       degrading vs physics.
+      **Code ready:** `--balancer {gradnorm,gradnorm_renorm,relobralo,fixed}`
+      in `run_walk_forward.py`/`run_stage2.py` (default `gradnorm` = v1,
+      byte-identical). LAUNCH: `sbatch --array=0-5 slurm/run_w1_balancer.sh`
+      ({B6,B10} × {relobralo,renorm,fixed}, folds Aug/Oct/Nov, → runs/v2/,
+      track_test_curve on; v1 gradnorm runs are the control).
 - [ ] Principled target: **augmented Lagrangian** (PECANN/CAPU-style) — data =
       objective; PDE/TC/BC = equality constraints; arbitrage = inequality
-      constraints with self-limiting multipliers.
-- [ ] Keep fixed-schedule weights as the robustness baseline.
+      constraints with self-limiting multipliers. Implement after the cheap
+      test confirms bounding is the lever.
+- [x] Fixed-schedule robustness baseline: `--balancer fixed` (no adaptation;
+      included in the W1 test array).
 - [ ] Decision gate: ReLoBRaLo vs ALM vs fixed-schedule on weight convergence +
       RMSE + implementation risk.
 

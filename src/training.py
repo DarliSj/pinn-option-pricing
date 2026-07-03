@@ -8,7 +8,9 @@ import numpy as np
 import torch
 from .bs_formulas import bs_call_normalized
 from .model import PricingNet, StandardPricingNet
-from .losses import compute_individual_losses, compute_grad_norms, update_adaptive_weights
+from .losses import (compute_individual_losses, compute_grad_norms,
+                     update_adaptive_weights, update_weights_relobralo,
+                     grad_cosine)
 
 
 def make_batch(train_arrays, boundary_data, config, rng, device,
@@ -113,6 +115,12 @@ def validate(model, test_arrays, sigma, r, device, vol_model=None,
     n_test = int(mid_t.numel())
     rmse_mkt = float((sum_sq_err_mkt / n_test) ** 0.5)
     mae_mkt = float(sum_abs_err_mkt / n_test)
+    # Median absolute percentage error — relative metric so dollar errors
+    # are interpretable across TSLA's huge 2020 price range. Median (not
+    # mean) is robust to the near-zero-mid denominator tail.
+    medape_mkt = float(torch.median(
+        torch.abs(residuals_mkt) / torch.clamp(torch.abs(mid_t), min=1e-6)
+    ).item())
 
     # ── Spread-normalized RMSE ─────────────────────────────────────
     # z_i = (p̂_i − p_obs,i) / (spread_i / 2). Spread floor avoids
@@ -152,6 +160,7 @@ def validate(model, test_arrays, sigma, r, device, vol_model=None,
         "rmse_bs_norm":    rmse_bs,
         "rmse_mkt":        rmse_mkt,
         "mae_mkt":         mae_mkt,
+        "medape_mkt":      medape_mkt,
         "sum_sq_err_mkt":  sum_sq_err_mkt,
         "sum_abs_err_mkt": sum_abs_err_mkt,
         "n_test":          n_test,
@@ -210,7 +219,10 @@ def run_training(train_arrays, test_arrays, boundary_data, config,
                  val_arrays=None,
                  track_test_curve=False,
                  fixed_data_weight=None,
-                 data_loss_warmup=0):
+                 data_loss_warmup=0,
+                 balancer="gradnorm",
+                 relobralo_temperature=0.1,
+                 relobralo_rho=0.99):
     """
     Full training pipeline. Returns model, history, run_info.
 
@@ -260,6 +272,24 @@ def run_training(train_arrays, test_arrays, boundary_data, config,
             1.0 at warmup-end, then either adapted by grad-norm or held
             fixed (per `fixed_data_weight`).
 
+        balancer: Loss-balancing scheme (workstream W1). One of:
+            "gradnorm"        — v1 default: Wang et al. Eq 5.3 with EMA +
+                                TC/BC floor. UNBOUNDED (the λ_data-runaway
+                                defect lives here); kept as-is so completed
+                                runs stay reproducible.
+            "gradnorm_renorm" — same update renormalized to Σλ = n_terms
+                                (bounded 1-line control; no TC/BC floor).
+            "relobralo"       — bounded softmax of relative loss progress
+                                (Bischof & Kraus 2021). Loss-statistics
+                                based: no per-term backward passes.
+            "fixed"           — no adaptation; weights stay at their init
+                                (1.0 each; data pinnable via
+                                fixed_data_weight). Robustness baseline.
+        relobralo_temperature: ReLoBRaLo softmax temperature T.
+        relobralo_rho: ReLoBRaLo Bernoulli lookback probability (drawn once
+            per UPDATE — cadence here is grad_norm_freq epochs, not every
+            step as in the paper).
+
     Returns:
         model: After training, restored to the val-best state (if val
             supplied) or final-epoch state (if not).
@@ -273,6 +303,10 @@ def run_training(train_arrays, test_arrays, boundary_data, config,
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if hidden_dims is None:
         hidden_dims = [64, 64, 64, 64]
+    valid_balancers = ("gradnorm", "gradnorm_renorm", "relobralo", "fixed")
+    if balancer not in valid_balancers:
+        raise ValueError(f"balancer must be one of {valid_balancers}, "
+                         f"got {balancer!r}")
 
     # ── Build model ─────────────────────────────────────────────────
     torch.manual_seed(seed)
@@ -372,6 +406,11 @@ def run_training(train_arrays, test_arrays, boundary_data, config,
     # to preserve "test touched exactly once" invariant. ONLY enable for
     # post-hoc analysis (val-best vs final-epoch comparison).
     history["test_rmse_mkt_diagnostic"] = []
+    # W0 diagnostic: gradient alignment cos(∇L_data, ∇L_pde) at the
+    # balancer cadence. cos < 0 ⇒ DIRECTIONAL conflict (constant-σ ⟂ smile
+    # signature) that no magnitude-balancing scheme can fix.
+    history["grad_align_epoch"] = []
+    history["grad_align_data_pde"] = []
 
     # Best-val tracking + snapshot. When val_arrays is supplied, we
     # snapshot the model whenever val rmse improves and restore that
@@ -381,6 +420,11 @@ def run_training(train_arrays, test_arrays, boundary_data, config,
     best_state      = None
     use_val = val_arrays is not None
     rng_train = np.random.default_rng(seed)
+    # Balancer state: ReLoBRaLo progress ratios + a SEPARATE RNG for its
+    # Bernoulli lookback, so the batch-sampling stream (rng_train) is
+    # byte-identical across balancer choices.
+    relobralo_state = {}
+    rng_balancer = np.random.default_rng(seed + 1)
 
     if verbose:
         n_pricing_params = sum(p.numel() for p in model.parameters())
@@ -400,6 +444,8 @@ def run_training(train_arrays, test_arrays, boundary_data, config,
                   f"(excluded from grad-norm balancing)")
         if data_loss_warmup > 0:
             print(f"  Data loss WARMUP: epochs 1..{data_loss_warmup} run as physics-only")
+        if balancer != "gradnorm":
+            print(f"  Balancer: {balancer} (v1 default is 'gradnorm')")
         print("=" * 70)
 
     t0 = time.time()
@@ -437,16 +483,46 @@ def run_training(train_arrays, test_arrays, boundary_data, config,
             vol_model=vol_model, vol_type=vol_type,
         )
 
-        # Grad-norm weight update (only over terms currently active AND not
-        # excluded by fixed_data_weight)
+        # Balancer weight update (only over terms currently active AND not
+        # excluded by fixed_data_weight). All schemes share the cadence.
         if epoch % grad_norm_freq == 0 or epoch == 1:
             extra_params = list(vol_model.parameters()) if vol_model is not None else None
-            grad_norms = compute_grad_norms(model, individual_losses,
-                                            extra_params=extra_params)
-            adaptive_weights = update_adaptive_weights(
-                adaptive_weights, grad_norms, alpha=grad_norm_alpha,
-                excluded_terms=excluded_from_balance,
+            # Per-term gradients: consumed by the grad-norm family, and
+            # DELIBERATELY also computed under relobralo/fixed (which don't
+            # need them for weighting) so the W0 gradient-alignment
+            # diagnostic cos(∇L_data, ∇L_pde) is logged uniformly across
+            # ALL balancer arms — do not "optimize" this away for
+            # non-gradnorm balancers. Cost: 4–5 extra backward passes per
+            # grad_norm_freq epochs (~15 ticks/run) — negligible. Flat
+            # vectors are materialized only for the two terms the
+            # diagnostic reads.
+            grad_norms, flat_grads = compute_grad_norms(
+                model, individual_losses,
+                extra_params=extra_params, flat_terms=("data", "pde"),
             )
+            align = grad_cosine(flat_grads, a="data", b="pde")
+            if align is not None:
+                history["grad_align_epoch"].append(epoch)
+                history["grad_align_data_pde"].append(align)
+
+            if balancer in ("gradnorm", "gradnorm_renorm"):
+                adaptive_weights = update_adaptive_weights(
+                    adaptive_weights, grad_norms, alpha=grad_norm_alpha,
+                    excluded_terms=excluded_from_balance,
+                    renormalize=(balancer == "gradnorm_renorm"),
+                )
+            elif balancer == "relobralo":
+                adaptive_weights = update_weights_relobralo(
+                    adaptive_weights,
+                    {n: float(l.item()) for n, l in individual_losses.items()},
+                    relobralo_state,
+                    alpha=grad_norm_alpha,
+                    temperature=relobralo_temperature,
+                    rho_p=relobralo_rho,
+                    rng=rng_balancer,
+                    excluded_terms=excluded_from_balance,
+                )
+            # balancer == "fixed": no adaptation — weights stay at init.
 
         # Weighted total loss
         loss_total = sum(
@@ -588,6 +664,7 @@ def run_training(train_arrays, test_arrays, boundary_data, config,
         "final_rmse_bs_norm": final_test["rmse_bs_norm"],
         "final_rmse_mkt":     final_test["rmse_mkt"],
         "final_mae_mkt":      final_test["mae_mkt"],
+        "final_medape_mkt":   final_test["medape_mkt"],
         "final_rmse_spread":  final_test["rmse_spread"],
         "final_rmse_otm":     final_test["rmse_otm"],
         "final_rmse_atm":     final_test["rmse_atm"],

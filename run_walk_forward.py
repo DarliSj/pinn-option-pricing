@@ -69,6 +69,28 @@ def main():
                         help="Number of warmup epochs to train as physics-only "
                              "before turning on L_data. Lets PDE/TC/BC find "
                              "a stable basin first. Default: 0 (no warmup).")
+    parser.add_argument("--balancer", default="gradnorm",
+                        choices=["gradnorm", "gradnorm_renorm", "relobralo", "fixed"],
+                        help="Loss-balancing scheme (W1). 'gradnorm' = v1 "
+                             "default (Wang, UNBOUNDED — reproduces completed "
+                             "runs); 'gradnorm_renorm' = bounded Σλ control; "
+                             "'relobralo' = bounded loss-statistics scheme; "
+                             "'fixed' = no adaptation (robustness baseline). "
+                             "Non-default choices are suffixed onto the "
+                             "output dir name.")
+    parser.add_argument("--relobralo_temperature", type=float, default=0.1,
+                        help="ReLoBRaLo softmax temperature T (only used "
+                             "with --balancer relobralo).")
+    parser.add_argument("--relobralo_rho", type=float, default=0.99,
+                        help="ReLoBRaLo Bernoulli lookback probability ρ, "
+                             "drawn once per balancer update (only used "
+                             "with --balancer relobralo).")
+    parser.add_argument("--track_test_curve", action="store_true",
+                        help="DIAGNOSTIC ONLY: also evaluate the test month "
+                             "at every val cadence and record the curve in "
+                             "history. Never used for selection — enables "
+                             "post-hoc val-best vs final-epoch vs oracle "
+                             "comparison (W0/W3).")
     args = parser.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -90,6 +112,8 @@ def main():
         run_tag += f"_fixdata{args.fixed_data_weight}"
     if args.data_loss_warmup > 0:
         run_tag += f"_warmup{args.data_loss_warmup}"
+    if args.balancer != "gradnorm":
+        run_tag += f"_{args.balancer}"
     output_dir = Path(args.output_dir) / run_tag
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -156,6 +180,10 @@ def main():
             val_every=500,
             fixed_data_weight=args.fixed_data_weight,
             data_loss_warmup=args.data_loss_warmup,
+            balancer=args.balancer,
+            relobralo_temperature=args.relobralo_temperature,
+            relobralo_rho=args.relobralo_rho,
+            track_test_curve=args.track_test_curve,
         )
 
         # Model is now restored to val-best (or final-epoch if val=None).
@@ -177,6 +205,7 @@ def main():
             "rmse_bs_norm": run_info["final_rmse_bs_norm"],
             "rmse_mkt":     run_info["final_rmse_mkt"],
             "mae_mkt":      run_info["final_mae_mkt"],
+            "medape_mkt":   run_info.get("final_medape_mkt"),
             "rmse_spread":  run_info["final_rmse_spread"],
             "rmse_otm":     run_info["final_rmse_otm"],
             "rmse_atm":     run_info["final_rmse_atm"],
@@ -191,11 +220,14 @@ def main():
             "sum_sq_err_otm":    run_info["final_sum_sq_err_otm"],
             "sum_sq_err_atm":    run_info["final_sum_sq_err_atm"],
             "sum_sq_err_itm":    run_info["final_sum_sq_err_itm"],
-            # Arbitrage diagnostic
+            # Arbitrage diagnostic — rate AND severity (int_neg = integrated
+            # negative part; rates alone hide the local blow-ups)
             "arb_butterfly_ratio":   arb["butterfly_ratio"],
             "arb_calendar_ratio":    arb["calendar_ratio"],
             "arb_butterfly_max_neg": arb["butterfly_max_neg"],
             "arb_calendar_max_neg":  arb["calendar_max_neg"],
+            "arb_butterfly_int_neg": arb["butterfly_int_neg"],
+            "arb_calendar_int_neg":  arb["calendar_int_neg"],
             "elapsed": run_info["elapsed_seconds"],
             # Val curve trajectory (for diagnostic plotting)
             "val_epoch":        [int(x)   for x in history["val_epoch"]],
@@ -298,6 +330,8 @@ def main():
         "pooled_rmse_itm":     pooled_rmse_itm,
         "mean_rmse_mkt":       float(np.mean(rmses)),
         "std_rmse_mkt":        float(np.std(rmses)),
+        "mean_mae_mkt":        float(np.mean(maes)),
+        "std_mae_mkt":         float(np.std(maes)),
         "worst_rmse_mkt":      worst_rmse,
         "worst_fold":          worst_fold,
         "e_star_mean":         e_star_mean,
@@ -306,9 +340,15 @@ def main():
         "e_star_max":          int(max(e_stars)) if e_stars else None,
         "mean_arb_butterfly_ratio": pooled_arb_butterfly,
         "mean_arb_calendar_ratio":  pooled_arb_calendar,
+        # Severity (integrated negative part) — mean across folds
+        "mean_arb_butterfly_int_neg": float(np.mean(
+            [r["arb_butterfly_int_neg"] for r in results])),
+        "mean_arb_calendar_int_neg":  float(np.mean(
+            [r["arb_calendar_int_neg"] for r in results])),
         "total_n_test":        total_n,
         "n_folds":             len(results),
         "val_months":          args.val_months,
+        "balancer":            args.balancer,
     }
     with open(output_dir / "results.json", "w") as f:
         json.dump({"folds": results, "summary": summary}, f, indent=2)

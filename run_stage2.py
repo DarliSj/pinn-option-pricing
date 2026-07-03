@@ -91,6 +91,21 @@ def main():
                         help="Comma-separated subset of fold names to run "
                              "(e.g. 'Nov2020' for smoke test). Default: all 9.")
     parser.add_argument("--no_plots", action="store_true")
+    parser.add_argument("--balancer", default="gradnorm",
+                        choices=["gradnorm", "gradnorm_renorm", "relobralo", "fixed"],
+                        help="Loss-balancing scheme (W1). 'gradnorm' = v1 "
+                             "default (reproduces completed Stage 2 runs). "
+                             "Non-default choices are suffixed onto the "
+                             "output dir name.")
+    parser.add_argument("--relobralo_temperature", type=float, default=0.1,
+                        help="ReLoBRaLo softmax temperature T (only used "
+                             "with --balancer relobralo).")
+    parser.add_argument("--relobralo_rho", type=float, default=0.99,
+                        help="ReLoBRaLo Bernoulli lookback probability ρ "
+                             "(only used with --balancer relobralo).")
+    parser.add_argument("--track_test_curve", action="store_true",
+                        help="DIAGNOSTIC ONLY: record the test curve at val "
+                             "cadence in history; never used for selection.")
     parser.add_argument("--val_months", type=int, default=1,
                         help="Months of training tail held out as the "
                              "validation window. Drives val-best snapshot "
@@ -110,8 +125,11 @@ def main():
     df = load_and_preprocess(args.data)
     print(f"Full dataset: {len(df):,} obs, {df['date'].min().date()} -> {df['date'].max().date()}")
 
-    # Output directory — tag distinguishes warm-start vs from-scratch
+    # Output directory — tag distinguishes warm-start vs from-scratch,
+    # and non-default balancers (so W1+ runs never collide with v1 dirs)
     run_tag = args.vol_type + ("_scratch" if args.from_scratch else "")
+    if args.balancer != "gradnorm":
+        run_tag += f"_{args.balancer}"
     output_dir = Path(args.output_dir) / run_tag
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -222,6 +240,10 @@ def main():
             pricing_lr=args.pricing_lr,
             vol_lr=args.vol_lr,
             checkpoint_path=(str(ckpt_path) if ckpt_path is not None else None),
+            balancer=args.balancer,
+            relobralo_temperature=args.relobralo_temperature,
+            relobralo_rho=args.relobralo_rho,
+            track_test_curve=args.track_test_curve,
         )
 
         # Model + vol_model are now restored to val-best (or final-epoch
@@ -258,6 +280,9 @@ def main():
             "arb_calendar_ratio":    arb["calendar_ratio"],
             "arb_butterfly_max_neg": arb["butterfly_max_neg"],
             "arb_calendar_max_neg":  arb["calendar_max_neg"],
+            "arb_butterfly_int_neg": arb["butterfly_int_neg"],
+            "arb_calendar_int_neg":  arb["calendar_int_neg"],
+            "medape_mkt":   run_info.get("final_medape_mkt"),
             "elapsed": run_info["elapsed_seconds"],
             "val_epoch":        [int(x)   for x in history["val_epoch"]],
             "val_rmse_mkt":     [float(x) for x in history["val_rmse_mkt"]],

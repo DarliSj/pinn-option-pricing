@@ -356,9 +356,15 @@ def compute_arbitrage_ratios(model, config, device, vol_model=None,
           butterfly_violations  : count of grid cells violating convexity
           butterfly_ratio       : violations / n_grid  (ideal: 0)
           butterfly_max_neg     : largest negative value of ∂²v̂/∂m²
+          butterfly_int_neg     : mean(relu(−∂²v̂/∂m²)) over the grid —
+                                  integrated SEVERITY. Rates hide local
+                                  blow-ups (a 30% rate of −0.01 dips vs a
+                                  5% rate of −300 spikes look inverted on
+                                  ratio alone); this is the fair scalar.
           calendar_violations   : count of grid cells violating monotonicity
           calendar_ratio        : violations / n_grid
           calendar_max_neg      : largest negative value of ∂v̂/∂τ
+          calendar_int_neg      : mean(relu(−∂v̂/∂τ)) over the grid
 
     Note: this is a *grid* check, not the training-time PDE residual; it
     catches whether the learned surface is shape-valid where the network
@@ -394,6 +400,7 @@ def compute_arbitrage_ratios(model, config, device, vol_model=None,
     butterfly_neg = d2v_dm2 < -tol
     butterfly_violations = int(butterfly_neg.sum())
     butterfly_max_neg = float(d2v_dm2.min())  # most-negative value
+    butterfly_int_neg = float(np.maximum(-d2v_dm2, 0.0).mean())  # severity
 
     # ── Calendar: ∂v̂/∂τ via forward difference ───────────────────────
     v_tau_plus = _eval(m_flat, (tau_flat + eps_tau).clip(max=config["tau_max"]))
@@ -402,6 +409,7 @@ def compute_arbitrage_ratios(model, config, device, vol_model=None,
     calendar_neg = dv_dtau < -tol
     calendar_violations = int(calendar_neg.sum())
     calendar_max_neg = float(dv_dtau.min())
+    calendar_int_neg = float(np.maximum(-dv_dtau, 0.0).mean())  # severity
 
     n_grid = int(M_g.size)
     return {
@@ -409,9 +417,11 @@ def compute_arbitrage_ratios(model, config, device, vol_model=None,
         "butterfly_violations": butterfly_violations,
         "butterfly_ratio": butterfly_violations / n_grid,
         "butterfly_max_neg": butterfly_max_neg,
+        "butterfly_int_neg": butterfly_int_neg,
         "calendar_violations": calendar_violations,
         "calendar_ratio": calendar_violations / n_grid,
         "calendar_max_neg": calendar_max_neg,
+        "calendar_int_neg": calendar_int_neg,
         "tol": tol,
     }
 

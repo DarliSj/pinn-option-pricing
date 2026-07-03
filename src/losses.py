@@ -4,8 +4,12 @@ Loss functions for the PINN option pricing model.
 PDE residual via autodiff, individual loss terms, grad-norm adaptive balancing.
 Stage 2 extensions: learnable volatility surface (vol_model kwarg),
 regularization losses (multiplier reg for C-Vol, smoothness reg for A-Vol).
+W1 extensions: bounded balancers (Σλ-renormalized grad-norm, ReLoBRaLo).
 """
 
+import math
+
+import numpy as np
 import torch
 
 
@@ -170,7 +174,7 @@ def compute_individual_losses(model, batch, sigma, r, mode="physics",
     return losses
 
 
-def compute_grad_norms(model, losses, extra_params=None):
+def compute_grad_norms(model, losses, extra_params=None, flat_terms=None):
     """
     Compute ||∇_θ L_i|| for each loss term.
     Used by the grad-norm balancing scheme.
@@ -180,8 +184,18 @@ def compute_grad_norms(model, losses, extra_params=None):
             computation (e.g. vol_model.parameters() in Stage 2). This
             ensures the balancing scheme sees gradients through ALL trainable
             networks. None for Stage 0/1 (backward compatible).
+        flat_terms: Optional iterable of loss-term NAMES for which to ALSO
+            return a flat 1-D grad tensor (zeros where a param is unused by
+            that loss), for the gradient-alignment diagnostic. Only the
+            requested terms are materialized (the flat vectors are only
+            needed pairwise, so building them for every term would be pure
+            waste). When given, returns (grad_norms, flat_grads). Default
+            None → dict of norms only (backward compatible with all v1
+            call sites).
     """
+    flat_wanted = set(flat_terms or ())
     grad_norms = {}
+    flat_grads = {} if flat_wanted else None
     params = [p for p in model.parameters() if p.requires_grad]
     if extra_params is not None:
         params = params + [p for p in extra_params if p.requires_grad]
@@ -195,13 +209,44 @@ def compute_grad_norms(model, losses, extra_params=None):
             if g is not None:
                 total_norm += g.detach().pow(2).sum()
         grad_norms[name] = torch.sqrt(total_norm).item()
+        if name in flat_wanted:
+            flat_grads[name] = torch.cat([
+                (g.detach().flatten() if g is not None
+                 else torch.zeros(p.numel(), device=p.device))
+                for g, p in zip(grads, params)
+            ])
 
+    if flat_wanted:
+        return grad_norms, flat_grads
     return grad_norms
+
+
+def grad_cosine(flat_grads, a="data", b="pde"):
+    """
+    Cosine similarity between two loss terms' full gradient vectors.
+
+    W0 diagnostic for DIRECTIONAL conflict: the balancer corrects magnitude
+    imbalance, but cos < 0 means the data and PDE objectives pull the
+    parameters in opposing directions — a signature of the constant-σ ⟂
+    smile model conflict that no weighting scheme can fix (motivates
+    learnable σ, and gradient-surgery methods if persistent).
+
+    Returns float in [−1, 1], or None if either term is absent/degenerate.
+    """
+    if flat_grads is None or a not in flat_grads or b not in flat_grads:
+        return None
+    ga, gb = flat_grads[a], flat_grads[b]
+    na = torch.linalg.norm(ga)
+    nb = torch.linalg.norm(gb)
+    if float(na) < 1e-12 or float(nb) < 1e-12:
+        return None
+    return float((torch.dot(ga, gb) / (na * nb)).item())
 
 
 def update_adaptive_weights(current_weights, grad_norms, alpha=0.9,
                             min_constraint_weight=10.0,
-                            excluded_terms=None):
+                            excluded_terms=None,
+                            renormalize=False):
     """
     Wang et al. Algorithm 1 (Eq 5.3): grad-norm balancing with EMA.
 
@@ -217,6 +262,13 @@ def update_adaptive_weights(current_weights, grad_norms, alpha=0.9,
             when running the "decouple data from balancing" ablation
             (Wang's Algorithm 1 was tested only with PDE+IC+BC, not with
             an additional supervised data term).
+        renormalize: W1 "bounded grad-norm" control. When True, rescale the
+            balanced weights after the EMA so Σλ = n_balanced (each averages
+            1.0) — the simplex constraint from original GradNorm (Chen et
+            al. 2018). No single λ can run away; if λ_data grows the others
+            must shrink. The TC/BC floor is SKIPPED in this mode (a floor of
+            10 is unsatisfiable when Σλ ≈ 4). Default False → identical to
+            the v1 behaviour.
     """
     excluded = set(excluded_terms or ())
     # Sum over the terms that ARE being balanced — Wang's Eq 5.3 enforces
@@ -236,9 +288,105 @@ def update_adaptive_weights(current_weights, grad_norms, alpha=0.9,
             target = current_weights[name]
         new_weights[name] = alpha * current_weights[name] + (1 - alpha) * target
 
+    if renormalize:
+        balanced = [n for n in new_weights if n not in excluded]
+        s = sum(new_weights[n] for n in balanced)
+        if s > 1e-12:
+            scale = float(len(balanced)) / s
+            for n in balanced:
+                new_weights[n] *= scale
+        return new_weights
+
     # Safety floor on constraint weights (only when adapted)
     for name in ["tc", "bc"]:
         if name in new_weights and name not in excluded:
             new_weights[name] = max(new_weights[name], min_constraint_weight)
+
+    return new_weights
+
+
+def update_weights_relobralo(current_weights, losses_now, state,
+                             alpha=0.9, temperature=0.1, rho_p=0.99,
+                             rng=None, excluded_terms=None):
+    """
+    ReLoBRaLo — Relative Loss Balancing with Random Lookback
+    (Bischof & Kraus 2021, arXiv:2110.09813). W1 candidate replacing the
+    unbounded Wang grad-norm scheme.
+
+    Uses loss STATISTICS (progress ratios), not gradient norms — no extra
+    backward passes — and is bounded by construction: each candidate weight
+    vector is m·softmax(L_i(t) / (T·L_i(t'))), so weights live in (0, m)
+    and sum to m. The λ_data → 10⁵ runaway is structurally impossible.
+
+        λ̂_i(t; t') = m · softmax_i( L_i(t) / (T · L_i(t')) )
+        λ_i(t)     = α·[ ρ·λ_i(t−1) + (1−ρ)·λ̂_i(t; 0) ] + (1−α)·λ̂_i(t; t−1)
+
+    where t' = t−1 uses the previous update's losses (progress since last
+    update), t' = 0 uses the losses at each term's FIRST appearance
+    ("random lookback" — occasional resets toward a balanced start), and
+    ρ ~ Bernoulli(rho_p) is drawn once per update, shared across terms.
+
+    Notes for our setting:
+      - Update cadence is every `grad_norm_freq` epochs (1000), not every
+        step as in the paper, so α/ρ defaults here are per-update.
+      - Terms are registered lazily: when the data loss switches on after
+        the PDE-warmup, its init/prev entries are seeded with its first
+        observed value (ratio 1 → neutral start).
+      - No TC/BC floor (weights are bounded ≤ m; a floor of 10 is
+        incompatible). The paper's benchmarks ran without floors.
+
+    Args:
+        current_weights: dict {name: λ} (mutated copy is returned).
+        losses_now: dict {name: float} — current UNWEIGHTED loss values.
+        state: dict carrying {"init": {...}, "prev": {...}} across calls.
+            Pass the same dict every update; it is modified in place.
+        rng: np.random.Generator for the Bernoulli draw (falls back to a
+            fresh draw from numpy's default if None).
+        excluded_terms: names kept at their current weight (e.g. pinned
+            λ_data via --fixed_data_weight), excluded from the softmax.
+
+    Returns:
+        new_weights dict.
+    """
+    excluded = set(excluded_terms or ())
+    init = state.setdefault("init", {})
+    prev = state.setdefault("prev", {})
+
+    # Lazily register terms on first appearance (handles warmup→hybrid).
+    eps = 1e-12
+    active = [n for n in losses_now if n not in excluded]
+    for n in active:
+        if n not in init:
+            init[n] = max(float(losses_now[n]), eps)
+            prev[n] = max(float(losses_now[n]), eps)
+
+    m = len(active)
+    new_weights = dict(current_weights)
+    if m == 0:
+        return new_weights
+
+    def _softmax_weights(ref):
+        """m · softmax(L_i(t) / (T · ref_i)), max-subtracted for stability."""
+        z = [float(losses_now[n]) / (temperature * max(ref[n], eps)) for n in active]
+        zmax = max(z)
+        exps = [math.exp(v - zmax) for v in z]
+        s = sum(exps)
+        return {n: m * e / s for n, e in zip(active, exps)}
+
+    lam_prev_upd = _softmax_weights(prev)   # λ̂(t; t−1): progress since last update
+    lam_init     = _softmax_weights(init)   # λ̂(t; 0):   lookback to first-seen losses
+
+    if rng is not None:
+        rho = 1.0 if rng.random() < rho_p else 0.0
+    else:
+        rho = 1.0 if np.random.default_rng().random() < rho_p else 0.0
+
+    for n in active:
+        hist = rho * current_weights.get(n, 1.0) + (1.0 - rho) * lam_init[n]
+        new_weights[n] = alpha * hist + (1.0 - alpha) * lam_prev_upd[n]
+
+    # Record current losses for the next update's progress ratio.
+    for n in active:
+        prev[n] = max(float(losses_now[n]), eps)
 
     return new_weights
