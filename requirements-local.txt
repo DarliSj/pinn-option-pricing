@@ -1,0 +1,22 @@
+# Local ANALYSIS environment (macOS laptop) — NOT the training env.
+#
+# Training runs on DCC in the conda env `pinn_env` (GPU). This file is for
+# the local half of the workflow: aggregate results, compare methodologies,
+# run the W0 diagnostic audits, and build the paper — all on CPU, against
+# checkpoints/results pulled via git.
+#
+# Setup:
+#   python3 -m venv .venv
+#   ./.venv/bin/python -m pip install -r requirements-local.txt
+#   ./.venv/bin/python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+#
+# Then run analysis with ./.venv/bin/python (or activate: source .venv/bin/activate)
+#
+# torch is installed separately from the CPU wheel index above — the default
+# PyPI wheel pulls CUDA payloads that are useless on a Mac.
+
+numpy
+pandas
+scipy
+matplotlib
+tabulate        # pandas.to_markdown() backend, used by paper.qmd table chunks

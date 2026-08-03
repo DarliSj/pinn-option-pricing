@@ -21,6 +21,17 @@ dissolves once the trajectory converges. Each problem below follows the same
 four-part structure: (1) the weird result, (2) what we did and why, (3) why it
 breaks, (4) candidate fixes with pros/cons.
 
+> **⚠ UPDATE (2026-08, after W0/W1 ran).** The chain above is confirmed but is
+> **not the whole story**, and two claims in this document were revised by
+> measurement. W1 showed the balancer defect is real and fixable, yet fixing it
+> does **not** make hybrid beat physics — so the balancer was never the root
+> cause of the headline defect. The actual root cause is a **specification**
+> error: the network is never told the volatility regime a quote came from, so
+> the data term is fitting a one-to-many map. See **§P6** (new) for the
+> diagnosis, evidence, and the R1 fix now implemented. Read P1–P5 as the
+> (still-valid) analysis of the *training* layer, and P6 as what actually
+> governs whether market data helps at all.
+
 ---
 
 ## P1 — The loss balancing drifts (grad-norm runaway)
@@ -204,6 +215,158 @@ P1–P4:
   σ-regularization and arbitrage just become additional constraints with their own
   self-limiting multipliers. One framework covers Stage 1 balancing, Stage 2's
   extra terms, and the no-arbitrage objective.
+
+---
+
+## P6 — The data term is ILL-POSED: the net is never told the vol regime (R1)
+
+*Added 2026-08 after W0/W1 ran. This is the finding that reframes P1–P5.*
+
+**1. The weird result.** Fixing the balancer worked — and hybrid *still* lost to
+physics. On folds Aug/Oct/Nov (μ=0.75 throughout):
+
+| config | test RMSE | butterfly% | calendar% |
+|---|---|---|---|
+| **B3 physics (matched control)** | **5.90** | 25.0 | 0.4 |
+| B6 hybrid, gradnorm (v1) | 7.56 | 36.4 | 39.7 |
+| B6 hybrid, **relobralo** | 6.76 | 24.8 | 18.8 |
+| B6 hybrid, renorm | 8.38 | 32.8 | 30.1 |
+| B6 hybrid, fixed | 6.79 | 22.1 | 17.9 |
+| B10 hybrid (warmup), gradnorm (v1) | 6.25 | 36.6 | 16.8 |
+| B10 hybrid (warmup), relobralo | 7.57 | 21.6 | 17.8 |
+
+Bounding the balancer recovered a lot without warmup (7.56 → 6.76) and roughly
+halved the arbitrage rates — but **physics-only still wins at 5.90**. Adding
+market data makes the model worse no matter how the terms are weighted.
+
+**2. Why we expected otherwise.** The whole premise of the hybrid mode is that
+market quotes carry information the constant-σ PDE lacks (the smile). We assumed
+the reason it wasn't landing was the λ_data runaway — i.e. an *optimization*
+problem. W1 falsified that.
+
+**3. The actual cause — a missing input, not a bad weight.** Black–Scholes needs
+(S, K, τ, r, σ). Our network sees:
+
+| BS argument | in the network? |
+|---|---|
+| S, K | ✅ via `m = F/K`, refreshed per observation |
+| τ | ✅ |
+| **σ** | ❌ **frozen** at `σ_fixed`, one constant per fold |
+| r | ❌ frozen at `r_fixed` |
+
+So the net is asked to price with a **stale volatility** while the market
+repriced σ daily through a violently non-stationary year. The data loss then
+tries to teach it the market's σ — but with no σ input the only learnable object
+is a **time-average over the training window**, which is wrong for the test month
+and corrupts the shape the PDE had right.
+
+The target is therefore genuinely **one-to-many**: the same (m, τ) had different
+correct prices in March vs September. Measured: within a fine (m,τ) bucket, the
+across-date spread of v̂ is **0.0142 ≈ \$4.71** at the median strike — comparable
+to the ~\$6 RMSE we are trying to beat, and irreducible for *any* model whose
+only inputs are (m, τ).
+
+This single cause explains four separate puzzles:
+
+1. **hybrid < physics** — data fits a regime-mixed average.
+2. **cos(∇L_data, ∇L_pde) → −0.5** (the new W0 diagnostic; starts ≈ +0.1, ends
+   −0.19 to −0.48) — data pulls toward the average σ while the PDE holds
+   σ_fixed. Opposed gradients cannot be reconciled by *any* weighting scheme,
+   which is exactly why W1 could not fix this.
+3. **Stage 2's σ_θ came out flat** (W0 audit: corr(σ_θ, IV) ∈ [−0.26, +0.29];
+   B10/A-Vol learned a literally constant σ = 0.594) — because `σ_θ(m, τ)` has
+   **no regime input either**, so it too can only learn a time-average, and the
+   time-average of a wildly moving σ is ≈ a constant.
+4. **GAM and laGP also lost to BS** — same featurization, same blind spot.
+
+**4. Evidence that the fix works** (bucket models, 9-fold walk-forward,
+mean-fold RMSE — `scripts/` run locally, no training):
+
+| model | mean-fold | pooled |
+|---|---|---|
+| BS(σ_fixed) | 6.95 | 8.79 |
+| BS + residual(m, τ) | 6.72 | — |
+| **BS + residual(m, τ, ν)** | **6.23** | **7.78** |
+| BS(σ = ν) — ν used *as* sigma | 8.61 ✗ | 11.47 ✗ |
+
+with ν = 1-day-lagged ATM-median IV. The regime-conditioned correction beats
+**every model in the benchmark** (B10 hybrid 6.75, B3 physics 7.05, GAM 7.26,
+laGP 8.81), wins 8/9 folds against BS, and gains most exactly on the
+regime-break folds (Nov −1.69, Dec −1.76, Sep −1.65).
+
+**The critical negative result:** feeding ν in *as the pricing σ* is much worse
+(6.95 → 8.61). ν is a noisy daily estimate and the price is exposed to it through
+vega. **ν is a conditioning INPUT, never σ.** σ_fixed survives precisely because
+it is a heavily smoothed estimator.
+
+### What changed in the code (R1) — and what did NOT
+
+**The loss functions are unchanged.** No new term, no reweighting. `L_data` is
+still plain MSE:
+
+    L_data = mean_i ( v̂_θ(m_i, τ_i, ν_i) − v̂_market,i )²
+
+The only difference is the third argument. Each quote now carries the vol state
+of its own date, so the regression stops being one-to-many. Same loss,
+well-posed.
+
+**What is fed where** (`--regime_input atm_iv_lag`, default `none` = v1):
+
+| term | inputs | ν source | target |
+|---|---|---|---|
+| `L_pde` | (m, τ, ν) at collocation pts | sampled i.i.d. from the **training quotes'** empirical ν distribution | residual → 0, **σ = σ_fixed** |
+| `L_tc` | (m, τ≈0, ν) | same empirical draw | payoff `max(m−1,0)` (ν-independent) |
+| `L_bc` | (m_min/m_max, τ, ν) | same empirical draw | analytic BS at σ_fixed (ν-independent) |
+| `L_data` | (m, τ, ν) at quotes | **the quote's own date** | `v̂_market` |
+
+Two deliberate properties follow:
+
+- **Physics is ν-independent**: derivatives are taken in (m, τ) only — ν is a
+  *parameter* of the surface, not a PDE coordinate — so every ν-slice must
+  satisfy the *same* σ_fixed BS equation. Physics anchors all slices to one
+  reference solution; only the data term differentiates them. Where there are no
+  quotes, every slice collapses back to the BS surface, reproducing the
+  "fall back to BS on unseen buckets" behaviour that made the bucket model
+  conservative.
+- **Collocation ν is drawn from the empirical training distribution**, so the PDE
+  is enforced across the regimes that actually occurred, density-weighted.
+
+Data plumbing: `atm_iv_lag` is built in `load_and_preprocess` (per-date median IV
+of quotes with moneyness ∈ [0.95, 1.05], shifted one day, ffill/bfill) — the same
+no-look-ahead construction as the existing `daily_vol_proxy`, but unbiased (the
+smile-wide mean sits ≈ +0.11 high, which is why it is the *worse* conditioner).
+`df_to_arrays` exposes it as `"nu"`; `make_batch(regime=True)` attaches it to
+every point type; `PricingNet/StandardPricingNet` take `n_inputs=3`.
+
+Reproducibility guards: default is off and byte-identical; all extra RNG draws
+sit inside `if regime:` so the v1 sampling stream is untouched; run dirs get a
+`_nuatm` suffix; and the 3-input Fourier matrix means a regime checkpoint
+**fails loudly** rather than silently loading into a 2-input net.
+
+**Operational caveat to state in the paper:** ν commits us to a daily vol feed at
+inference. It is strictly lagged (no look-ahead), and it is the same standing as
+the forward price we already consume per-observation — the model already sees
+today's *spot*; R1 simply stops hiding today's *vol level*.
+
+### Stage 2 under R1 — the same fix, and a design choice
+
+The W0 audit's flat-σ_θ finding is a *specification* limitation, not a training
+failure, so Stage 2 inherits the same remedy: **`σ_θ(m, τ, ν)`**. Two variants to
+ablate once Stage 1 confirms the transfer:
+
+- **(a) minimal** — vol net simply gains the ν input; the C-Vol anchor stays
+  σ_fixed. Lowest risk.
+- **(b) regime-anchored C-Vol** — `σ² = μ(m, τ, ν) · ν²`, so the multiplier
+  learns the **smile shape relative to the current ATM level** (sticky-moneyness,
+  which is how practitioner surfaces are actually quoted). More expressive, and
+  it directly targets the inertness we measured. Risk: it re-exposes the model to
+  ν's level noise through the anchor — mitigated because μ can learn a systematic
+  correction, which argues for **weakening the (μ−1)² regulariser** (already on
+  the plan for independent reasons).
+
+Hard constraint either way: **a 3-input Stage 2 must warm-start from a 3-input
+Stage 1 checkpoint** — regime runs chain to regime runs, never across (enforced
+by the shape check above).
 
 ---
 

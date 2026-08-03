@@ -13,7 +13,7 @@ import numpy as np
 import torch
 
 
-def compute_pde_residual(model, m, tau, sigma, r, vol_model=None):
+def compute_pde_residual(model, m, tau, sigma, r, vol_model=None, nu=None):
     """
     BS PDE residual via automatic differentiation.
 
@@ -28,8 +28,15 @@ def compute_pde_residual(model, m, tau, sigma, r, vol_model=None):
             graph-connected (N, 1) tensor so gradients flow into the vol
             net's parameters. When None, falls back to the scalar sigma
             (backward compatible with Stage 0/1).
+        nu: Optional regime-conditioning input (R1). A PARAMETER of the
+            surface, not a PDE coordinate: derivatives are taken in (m, τ)
+            only, so each ν-slice v̂(·, ·, ν) must satisfy the same
+            σ_fixed-BS PDE. Physics anchors every slice to one reference
+            solution; only the data term differentiates the slices. nu does
+            NOT require grad. Deliberately NOT used as σ (test evidence:
+            a lagged daily σ estimate prices badly through vega).
     """
-    v = model(m, tau)
+    v = model(m, tau, nu) if nu is not None else model(m, tau)
     ones = torch.ones_like(v)
 
     dv_dm, dv_dtau = torch.autograd.grad(
@@ -140,28 +147,44 @@ def compute_individual_losses(model, batch, sigma, r, mode="physics",
     """
     losses = {}
 
+    # Regime-conditioning inputs (R1) — present only when the run enables
+    # --regime_input; key-absence reproduces v1 behavior exactly.
+    nu_c = batch.get("nu_colloc")
+
     # PDE residual
     m_c = batch["m_colloc"].requires_grad_(True)
     tau_c = batch["tau_colloc"].requires_grad_(True)
     residual = compute_pde_residual(model, m_c, tau_c, sigma, r,
-                                    vol_model=vol_model)
+                                    vol_model=vol_model, nu=nu_c)
     losses["pde"] = torch.mean(residual**2)
 
-    # Terminal condition
-    v_tc_pred = model(batch["m_tc"], batch["tau_tc"])
+    # Terminal condition (payoff is ν-independent; ν only enters as input)
+    if batch.get("nu_tc") is not None:
+        v_tc_pred = model(batch["m_tc"], batch["tau_tc"], batch["nu_tc"])
+    else:
+        v_tc_pred = model(batch["m_tc"], batch["tau_tc"])
     losses["tc"] = torch.mean((v_tc_pred - batch["v_tc"].unsqueeze(1))**2)
 
-    # Boundary conditions
-    v_lo_pred = model(batch["m_bc_lo"], batch["tau_bc_lo"])
-    v_hi_pred = model(batch["m_bc_hi"], batch["tau_bc_hi"])
+    # Boundary conditions (targets are ν-independent analytic BS values)
+    if batch.get("nu_bc") is not None:
+        v_lo_pred = model(batch["m_bc_lo"], batch["tau_bc_lo"], batch["nu_bc"])
+        v_hi_pred = model(batch["m_bc_hi"], batch["tau_bc_hi"], batch["nu_bc"])
+    else:
+        v_lo_pred = model(batch["m_bc_lo"], batch["tau_bc_lo"])
+        v_hi_pred = model(batch["m_bc_hi"], batch["tau_bc_hi"])
     losses["bc"] = 0.5 * (
         torch.mean((v_lo_pred - batch["v_bc_lo"].unsqueeze(1))**2) +
         torch.mean((v_hi_pred - batch["v_bc_hi"].unsqueeze(1))**2)
     )
 
-    # Data loss (hybrid mode only)
+    # Data loss (hybrid mode only). With ν, each quote carries its own
+    # regime state — the (m,τ)→v̂ map stops being one-to-many across dates.
     if mode == "hybrid":
-        v_data_pred = model(batch["train_m"], batch["train_tau"])
+        if batch.get("train_nu") is not None:
+            v_data_pred = model(batch["train_m"], batch["train_tau"],
+                                batch["train_nu"])
+        else:
+            v_data_pred = model(batch["train_m"], batch["train_tau"])
         losses["data"] = torch.mean((v_data_pred - batch["train_vhat"].unsqueeze(1))**2)
 
     # Volatility regularization (Stage 2 only)

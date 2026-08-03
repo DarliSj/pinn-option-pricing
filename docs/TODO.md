@@ -1,6 +1,6 @@
 # PINN Option Pricing — Project TODO
 
-*Last updated: 2026-06-03. Authoritative next-steps plan:
+*Last updated: 2026-08-03. Authoritative next-steps plan:
 `docs/HYBRID_PARETO_PLAN.md` (§4 resequenced: balancer first). Advisor
 discussion doc: `docs/TRAINING_VALIDATION_DISCUSSION.md`. This file tracks
 status + actionable items.*
@@ -14,9 +14,10 @@ walk-forward protocol (9 monthly folds, Apr–Dec 2020).
 - **Stage 1 (walk-forward ablation B0–B12 + baselines):** DONE — all configs run,
   master table built (`reports/master_table.csv`).
 - **Stage 2 (learnable σ, 2×2: B10/B12 × C-Vol/A-Vol):** DONE — all four cells run.
-- **Active workstream:** fix the training/validation foundation first
-  (W0–W3: balancer, protocol), then close the RMSE-vs-arbitrage Pareto gap
-  (W4–W7).
+- **Active workstream: R1 (regime-conditioned pricing net)** — W0/W1 are done and
+  redirected the plan. The balancer defect was real but not the root cause; the
+  root cause is a missing input (the net is never told the vol regime). R1 is
+  implemented and queued; R2 extends it to Stage 2. W2–W7 follow.
 - **Stage 3 (UQ):** deferred — only after the point model is sound.
 
 ### Headline results (current)
@@ -45,6 +46,49 @@ folds); clean arbitrage comes with worse-than-BS RMSE.
   trained against.
 - B1's apparent edge is protocol-linked (val-best rescues its late drift), not a
   better model.
+
+### RESULTS from W0 + W1 (ran 2026-08) — three findings, two corrections
+
+**W1 (balancer): the defect is real and fixable, but it was NOT the root cause.**
+λ_data runaway confirmed at **9.4×10⁴** (B6, gradnorm); ReLoBRaLo bounds it to
+**~2** — five orders of magnitude. Warmup only *delays* it (B10's λ_data sits at
+1 through warmup then climbs 1→309→780→946 the moment data switches on).
+Test RMSE on Aug/Oct/Nov (μ=0.75):
+
+| config | RMSE | bfly% | cal% |
+|---|---|---|---|
+| **B3 physics (matched control)** | **5.90** | 25.0 | 0.4 |
+| B6 hybrid gradnorm (v1) | 7.56 | 36.4 | 39.7 |
+| B6 hybrid **relobralo** | 6.76 | 24.8 | 18.8 |
+| B6 hybrid renorm | 8.38 | 32.8 | 30.1 |
+| B6 hybrid fixed | 6.79 | 22.1 | 17.9 |
+| B10 (warmup) gradnorm (v1) | 6.25 | 36.6 | 16.8 |
+| B10 (warmup) relobralo | 7.57 | 21.6 | 17.8 |
+
+- **ReLoBRaLo is the pick**; **renorm is NOT viable** — Σλ renormalisation bounds
+  the total but lets λ_pde *collapse* to ~2×10⁻⁴ (physics effectively switched
+  off → the Aug blow-up at 11.65). It converts a runaway into a collapse.
+- **Warmup and bounded balancing are substitutes, not complements** — bounding
+  helps without warmup (7.56→6.76) and hurts with it (6.25→7.57).
+- **Hybrid still loses to physics (5.90).** → root cause is elsewhere: see R1.
+
+**W0 audit 1 — ⚠ CORRECTION: the butterfly metric is largely an artifact.**
+Running the same finite-difference check on the *analytic BS* surface gives a
+noise floor of 4.015 (the payoff kink). PINN excess over that floor: standard
++0.1%, μ=0.5 +1.4%, μ=0.75 +3.1%, μ=1.0 +15%. **The earlier claim that the
+Modified-MLP is a primary arbitrage source is retracted for butterfly** — the
+dramatic *rates* (3.7% vs 38%) are sign-flips in near-zero-curvature regions.
+What IS real: μ=1.0 has 10× worse PDE fidelity (err 0.006 vs 0.0004) and genuine
+calendar violations (floor is exactly 0.0, μ=1.0 = 0.031). μ=1.0 is a bad *PDE
+solve* — that is the defensible claim.
+
+**W0 audit 2 — ⚠ CORRECTION: Stage 2's σ_θ does not track market IV.**
+corr(σ_θ, IV) ∈ [−0.26, +0.29]; beats a flat σ in only 3/8 cases (twice by
+~0.0004); **B10/A-Vol learned a literally constant σ = 0.594**; B12/C-Vol spans
+0.005. Stage 2 is doing **global σ recalibration, not smile learning**. The
+paper's §5 "pressure-valve / absorbed substantial smile" narrative rests on grid
+plots — at actual quote locations the variation nearly vanishes. **Paper revision
+required.**
 
 ### Key findings from the training/validation dive (2026-06-03)
 
@@ -111,6 +155,65 @@ first). Advisor analysis: `TRAINING_VALIDATION_DISCUSSION.md`.
       included in the W1 test array).
 - [ ] Decision gate: ReLoBRaLo vs ALM vs fixed-schedule on weight convergence +
       RMSE + implementation risk.
+
+### R1 — Regime-conditioned pricing net (NEW; the actual root-cause fix) ← RUNNING
+
+**Why.** W1 proved the balancer was not the root cause. The real defect is a
+**missing input**: BS needs (S,K,τ,r,σ); the net gets S,K via `m=F/K` and τ, but
+σ is *frozen* at σ_fixed per fold while the market repriced σ daily. So the data
+term is fitting a **one-to-many** map — the same (m,τ) had different correct
+prices in March vs September (measured across-date spread within a fine bucket:
+0.0142 ≈ **$4.71**). The data loss can only learn a regime-average, which is wrong
+for the test month and corrupts the shape physics had right. This one cause
+explains hybrid<physics, the −0.5 gradient conflict, the flat σ_θ, AND why
+GAM/laGP also lost to BS.
+
+**Evidence (bucket models, 9-fold, mean-fold RMSE — no training):**
+BS 6.95 | BS+resid(m,τ) 6.72 | **BS+resid(m,τ,ν) 6.23** | BS with ν used *as σ*
+8.61 ✗. The regime-conditioned correction beats every model in the benchmark
+(B10 6.75, B3 physics 7.05, GAM 7.26), winning 8/9 folds.
+
+**What changed.** The **loss functions are unchanged** — `L_data` is still plain
+MSE. Only the input space changed: `v̂_θ(m, τ, ν)` with ν = 1-day-lagged
+ATM-median IV (per quote's own date). Physics stays ν-independent (PDE at
+σ_fixed, TC, BC) so it anchors every ν-slice to one reference solution; only the
+data term differentiates slices. Collocation/TC/BC ν is drawn from the training
+quotes' empirical ν distribution. **ν is an INPUT, never σ** (as σ it scores
+8.61 — noisy daily estimate × vega). Full table of what-is-fed-where in
+`TRAINING_VALIDATION_DISCUSSION.md` §P6.
+
+- [x] `atm_iv_lag` in `load_and_preprocess` (no-look-ahead, ffill/bfill);
+      exposed via `df_to_arrays` as `"nu"`.
+- [x] `PricingNet` / `StandardPricingNet` take `n_inputs=3`; forward accepts `nu`.
+- [x] `compute_pde_residual` / `compute_individual_losses` thread ν (derivatives
+      in (m,τ) only — ν is a parameter, not a coordinate).
+- [x] `make_batch(regime=True)`; `validate(use_nu=)`; arbitrage check evaluated
+      at the fold's median test ν.
+- [x] `--regime_input {none,atm_iv_lag}` (default `none` = v1 byte-identical);
+      `_nuatm` run-tag suffix; `regime_input` recorded in results.json + run_info.
+- [x] Verified locally on CPU: both paths train; ν changes the output; 3-input
+      checkpoint **fails loudly** against a 2-input net.
+- [ ] **RUN:** `bash slurm/submit_r1.sh` → 6-task array, 9 folds, → `runs/v2/r1/`
+      (own subtree so it cannot overwrite W1's arms):
+      {hybrid+warmup} × {gradnorm, relobralo} × {no-ν, +ν}, plus physics and
+      physics+ν as a **null control** (physics is ν-independent → task 5 should
+      ≈ task 4, isolating "data became identifiable" from "extra capacity").
+- [ ] **ACCEPTANCE:** the +ν task beats BOTH its no-ν twin AND the physics
+      control (5.90 / 7.05 mean-fold) — the first time market data would help.
+- [ ] Aggregate: `build_master_table.py --runs_dir runs/v2/r1 --output_dir
+      reports/v2_r1 --label r1`, then `compare_methodologies.py`.
+
+### R2 — Stage 2 under regime conditioning (after R1 lands)
+- [ ] `σ_θ(m, τ, ν)` — the flat-σ_θ finding is a *specification* limit, so the
+      same fix applies. Ablate: **(a) minimal** (vol net gains ν, anchor stays
+      σ_fixed) vs **(b) regime-anchored C-Vol** `σ² = μ(m,τ,ν)·ν²`, where the
+      multiplier learns smile shape *relative to the current ATM level*
+      (sticky-moneyness). (b) is more expressive but re-exposes ν's level noise
+      via the anchor → pair with a weakened (μ−1)² reg (already planned).
+- [ ] Hard constraint: 3-input Stage 2 must warm-start from a **3-input** Stage 1
+      checkpoint — regime runs chain to regime runs (shape check enforces this).
+- [ ] Re-run the σ_θ-vs-IV overlay; success = corr(σ_θ, IV) clearly > 0 and
+      beating flat σ on most folds (v1 baseline: corr ∈ [−0.26,+0.29], 3/8).
 
 ### W2 — Architecture gate (~2 runs; parallel to W1)
 - [ ] modified-**physics** at μ ∈ {0.0, 0.25}: if arb-clean at low μ → keep
@@ -192,7 +295,8 @@ Items flagged ⚠ are being re-decided in the active workstream.
 | RWF σ | 0.1 | Wang et al. default |
 | Learning rate | 1e-3 (Stage 0/1) / 1e-4 (Stage 2 warm) | ⚠ Stage 2 pricing_lr ablation |
 | LR schedule | cosine → LR×0.01 | |
-| Loss balancing | grad-norm, freq 1000 / α 0.9 | ⚠ under replacement — ReLoBRaLo vs augmented Lagrangian (W1) |
+| Loss balancing | grad-norm, freq 1000 / α 0.9 | ⚠ **ReLoBRaLo is the W1 pick** (`--balancer relobralo`); renorm rejected (λ_pde collapse) |
+| Regime input ν | none (v1) / `atm_iv_lag` (R1) | `--regime_input`; 3-input net, `_nuatm` tag. ν is an INPUT, never σ |
 | Weight floor | 10 (TC, BC) | |
 | Collocation | 5000/iter, 70/30 uniform/kink | ⚠ add wing-weighted sampling |
 | Market batch | 8000 | hybrid |

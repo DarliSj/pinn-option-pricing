@@ -14,10 +14,18 @@ from .losses import (compute_individual_losses, compute_grad_norms,
 
 
 def make_batch(train_arrays, boundary_data, config, rng, device,
-               n_colloc_batch=5000, n_market_batch=8000):
+               n_colloc_batch=5000, n_market_batch=8000, regime=False):
     """
     Sample a fresh mini-batch for one training iteration.
     Collocation points are resampled; TC/BC use all pre-computed points.
+
+    regime (R1): when True, every sampled point additionally carries a
+    regime-conditioning input ν. Data points use their own quote's ν;
+    collocation/TC/BC points draw ν i.i.d. from the TRAINING quotes'
+    empirical ν distribution (physics is enforced across the regimes that
+    actually occurred, density-weighted). All extra RNG draws happen only
+    inside `if regime:` blocks, so the v1 sampling stream is untouched
+    when the flag is off.
     """
     batch = {}
     m_min, m_max = config["m_min"], config["m_max"]
@@ -55,12 +63,26 @@ def make_batch(train_arrays, boundary_data, config, rng, device,
     batch["train_tau"] = torch.tensor(train_arrays["tau"][idx]).to(device)
     batch["train_vhat"] = torch.tensor(train_arrays["vhat"][idx]).to(device)
 
+    # Regime-conditioning inputs (R1) — extra draws ONLY when enabled
+    if regime:
+        nu_pool = train_arrays["nu"]
+        batch["train_nu"] = torch.tensor(nu_pool[idx]).to(device)
+        batch["nu_colloc"] = torch.tensor(
+            rng.choice(nu_pool, size=n_colloc_batch).astype(np.float32)
+        ).to(device)
+        batch["nu_tc"] = torch.tensor(
+            rng.choice(nu_pool, size=len(bd["m_tc"])).astype(np.float32)
+        ).to(device)
+        batch["nu_bc"] = torch.tensor(
+            rng.choice(nu_pool, size=len(bd["tau_bc"])).astype(np.float32)
+        ).to(device)
+
     return batch
 
 
 @torch.no_grad()
 def validate(model, test_arrays, sigma, r, device, vol_model=None,
-             atm_band=(0.97, 1.03), spread_floor=0.05):
+             atm_band=(0.97, 1.03), spread_floor=0.05, use_nu=False):
     """Compute eval-set metrics on the supplied arrays.
 
     Returns the historical RMSE/MAE block plus three Stage-2-ready add-ons:
@@ -94,7 +116,11 @@ def validate(model, test_arrays, sigma, r, device, vol_model=None,
     K_t   = torch.tensor(test_arrays["K"]).to(device)
     mid_t = torch.tensor(test_arrays["mid"]).to(device)
 
-    v_pred = model(m_t, tau_t).squeeze()
+    if use_nu:
+        nu_t = torch.tensor(test_arrays["nu"]).to(device)
+        v_pred = model(m_t, tau_t, nu_t).squeeze()
+    else:
+        v_pred = model(m_t, tau_t).squeeze()
 
     # vs analytical BS (normalized) — only meaningful with constant σ
     if vol_model is None:
@@ -222,7 +248,8 @@ def run_training(train_arrays, test_arrays, boundary_data, config,
                  data_loss_warmup=0,
                  balancer="gradnorm",
                  relobralo_temperature=0.1,
-                 relobralo_rho=0.99):
+                 relobralo_rho=0.99,
+                 regime_input=None):
     """
     Full training pipeline. Returns model, history, run_info.
 
@@ -290,6 +317,15 @@ def run_training(train_arrays, test_arrays, boundary_data, config,
             per UPDATE — cadence here is grad_norm_freq epochs, not every
             step as in the paper).
 
+        regime_input (R1): None (v1 default) or "atm_iv_lag". When set, the
+            pricing net becomes v̂(m, τ, ν) with ν = per-quote 1-day-lagged
+            ATM IV (train_arrays/test_arrays must carry "nu"). Physics
+            (PDE at σ_fixed, TC, BC) stays ν-independent — it anchors every
+            regime slice to the same reference solution; the data term
+            (each quote at its own ν) differentiates the slices. Fixes the
+            one-to-many (m,τ)→v̂ regression that made hybrid underperform
+            physics. ν is an INPUT, never the pricing σ.
+
     Returns:
         model: After training, restored to the val-best state (if val
             supplied) or final-epoch state (if not).
@@ -312,6 +348,8 @@ def run_training(train_arrays, test_arrays, boundary_data, config,
     torch.manual_seed(seed)
     np.random.seed(seed)
 
+    use_nu = regime_input is not None
+    n_inputs = 3 if use_nu else 2
     if arch == "modified":
         model = PricingNet(
             hidden_dims=hidden_dims,
@@ -319,12 +357,14 @@ def run_training(train_arrays, test_arrays, boundary_data, config,
             fourier_scale=fourier_scale,
             rwf_mu=rwf_mu,
             rwf_sigma=rwf_sigma,
+            n_inputs=n_inputs,
         ).to(device)
     elif arch == "standard":
         model = StandardPricingNet(
             hidden_dims=hidden_dims,
             fourier_features=fourier_features,
             fourier_scale=fourier_scale,
+            n_inputs=n_inputs,
         ).to(device)
     else:
         raise ValueError(f"arch must be 'modified' or 'standard', got {arch!r}")
@@ -446,6 +486,9 @@ def run_training(train_arrays, test_arrays, boundary_data, config,
             print(f"  Data loss WARMUP: epochs 1..{data_loss_warmup} run as physics-only")
         if balancer != "gradnorm":
             print(f"  Balancer: {balancer} (v1 default is 'gradnorm')")
+        if use_nu:
+            print(f"  Regime input (R1): ν = {regime_input} "
+                  f"(3-input net; physics stays σ_fixed)")
         print("=" * 70)
 
     t0 = time.time()
@@ -458,7 +501,8 @@ def run_training(train_arrays, test_arrays, boundary_data, config,
             vol_model.train()
 
         batch = make_batch(train_arrays, boundary_data, config, rng_train,
-                           device, n_colloc_batch, n_market_batch)
+                           device, n_colloc_batch, n_market_batch,
+                           regime=use_nu)
 
         # Effective mode for this epoch: hold off on data loss during warmup
         in_warmup = (mode == "hybrid") and (epoch <= data_loss_warmup)
@@ -573,7 +617,7 @@ def run_training(train_arrays, test_arrays, boundary_data, config,
         if track_test_curve and (epoch % val_every == 0 or epoch == epochs):
             with torch.no_grad():
                 t_metrics = validate(model, test_arrays, sigma, r, device,
-                                     vol_model=vol_model)
+                                     vol_model=vol_model, use_nu=use_nu)
                 history["test_rmse_mkt_diagnostic"].append(t_metrics["rmse_mkt"])
 
         # Validation — val only, NEVER test (unless track_test_curve diagnostic)
@@ -586,7 +630,7 @@ def run_training(train_arrays, test_arrays, boundary_data, config,
             )
 
             val_metrics = validate(model, val_arrays, sigma, r, device,
-                                   vol_model=vol_model)
+                                   vol_model=vol_model, use_nu=use_nu)
             history["val_epoch"].append(epoch)
             history["val_rmse_mkt"].append(val_metrics["rmse_mkt"])
             history["val_rmse_bs_norm"].append(val_metrics["rmse_bs_norm"])
@@ -623,7 +667,7 @@ def run_training(train_arrays, test_arrays, boundary_data, config,
                   f"(val {selection_key}={best_val_metric:.6f})")
 
     # ── Single test eval — touch test_arrays exactly once, here ────────
-    final_test = validate(model, test_arrays, sigma, r, device,
+    final_test = validate(model, test_arrays, sigma, r, device, use_nu=use_nu,
                           vol_model=vol_model)
 
     if verbose:
@@ -645,6 +689,7 @@ def run_training(train_arrays, test_arrays, boundary_data, config,
         "rwf_mu": rwf_mu if arch == "modified" else None,
         "rwf_sigma": rwf_sigma if arch == "modified" else None,
         "hidden_dims": hidden_dims,
+        "regime_input": regime_input,   # R1: None (v1) or "atm_iv_lag"
         "elapsed_seconds": elapsed,
         # Stage 2 fields (None for Stage 0/1)
         "vol_type": vol_type,

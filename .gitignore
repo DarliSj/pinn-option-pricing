@@ -7,6 +7,9 @@ __pycache__/
 # Conda env — never commit this, recreate from environment_server.yml
 pinn_env/
 
+# Local analysis venv (macOS laptop) — recreate from requirements-local.txt
+.venv/
+
 # Transient run directories (smoke tests, intermediate stage2)
 runs/stage2/
 runs/smoke/

@@ -52,6 +52,28 @@ def load_and_preprocess(csv_path, moneyness_range=(0.65, 1.35), min_tte_days=3):
     df = df.merge(daily_vol[["date", "todays_vol_mean", "daily_vol_proxy"]],
                   on="date", how="left")
 
+    # Step 2b: 1-day lagged daily ATM-median IV — the regime-conditioning
+    # input ν (workstream R1). Median IV of near-ATM quotes (moneyness in
+    # [0.95, 1.05]) per date, shifted one day: strictly no-look-ahead, and
+    # unbiased vs the smile-wide mean above (which sits ~+0.11 high).
+    # NOTE (R1 test evidence, 2026-08): ν works as a CONDITIONING INPUT to
+    # the network; plugging it directly in as the pricing σ makes RMSE far
+    # worse (noisy daily estimate × vega). Do not use it as σ.
+    _m = df["forward_price"] / df["strike_price"]
+    atm_daily = (
+        df[( _m >= 0.95) & (_m <= 1.05)]
+        .groupby("date")["impl_volatility"]
+        .median()
+        .reset_index()
+        .rename(columns={"impl_volatility": "atm_iv_today"})
+        .sort_values("date")
+    )
+    atm_daily["atm_iv_lag"] = atm_daily["atm_iv_today"].shift(1).ffill().bfill()
+    df = df.merge(atm_daily[["date", "atm_iv_lag"]], on="date", how="left")
+    # Dates with no ATM quotes inherit the nearest available value
+    df = df.sort_values("date")
+    df["atm_iv_lag"] = df["atm_iv_lag"].ffill().bfill()
+
     # Step 3: Triple Witching exclusion
     for start, end in TRIPLE_WITCHING_2020:
         mask = (df["date"] >= pd.Timestamp(start)) & (df["date"] <= pd.Timestamp(end))
@@ -176,6 +198,8 @@ def df_to_arrays(frame):
         "mid":     frame["mid_price"].values.astype(np.float32),
         "K":       frame["strike_price"].values.astype(np.float32),
         "spread":  spread,
+        # Regime-conditioning input ν (R1): per-quote 1-day-lagged ATM IV.
+        "nu":      frame["atm_iv_lag"].values.astype(np.float32),
     }
 
 

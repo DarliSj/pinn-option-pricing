@@ -1,0 +1,580 @@
+<title>PINN Cluster Scripts — Runthroughs and Recipes</title>
+<link rel="stylesheet" href="style.css">
+
+<div class="titleblock">
+  <p class="kicker">Guide 2 of 2 &nbsp;·&nbsp; This project's slurm/ tree</p>
+  <h1>PINN Cluster Scripts</h1>
+  <p class="subtitle">What each script does, how the versioning works, and four end-to-end runthroughs.</p>
+  <p class="meta">Prerequisite: <em>Guide 1 — Using the Duke Compute Cluster</em> &nbsp;|&nbsp; Project root: <code>/hpc/group/fisherlab/ds555/pinn_code</code> &nbsp;|&nbsp; Drafted 2026-08-02</p>
+</div>
+
+<div class="box">
+  <span class="lbl">Scope</span>
+  <p>Guide 1 covers Slurm itself — partitions, <code>sbatch</code>, arrays, dependencies. This guide assumes that and covers only what is specific to this repository: the two-tier script design, the <code>RUN_ROOT</code> methodology split, and the exact command sequences for the work currently in flight. Everything here is drawn from the scripts as they stand in <code>slurm/</code>; if a script changes, the script wins.</p>
+</div>
+
+<div class="toc">
+  <ol>
+    <li>One-time setup on the cluster</li>
+    <li>The two-tier design: run_ vs submit_</li>
+    <li>Script inventory</li>
+    <li>RUN_ROOT — the v1/v2 split</li>
+    <li>Reading run_benchmark.sh line by line</li>
+    <li><strong>Runthrough A</strong> — W1 balancer, end to end</li>
+    <li><strong>Runthrough B</strong> — Stage 1 → Stage 2</li>
+    <li><strong>Runthrough C</strong> — W0 audits (no training)</li>
+    <li><strong>Runthrough D</strong> — interactive debugging</li>
+    <li>Monitoring while jobs run</li>
+    <li>Recipes</li>
+    <li>Writing a new job script</li>
+    <li>Project-specific hazards</li>
+  </ol>
+</div>
+
+<h2>1. One-time setup on the cluster</h2>
+
+<pre><code><span class="c"># 1 ── land on a login node</span>
+<span class="k">ssh</span> ds555@dcc-login.oit.duke.edu
+
+<span class="c"># 2 ── get the code into GROUP space (never home — see Guide 1 §3)</span>
+<span class="k">cd</span> /hpc/group/fisherlab/ds555
+<span class="k">git</span> clone &lt;repo-url&gt; pinn_code
+<span class="k">cd</span> pinn_code
+
+<span class="c"># 3 ── miniconda, also in group space</span>
+<span class="k">wget</span> https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
+<span class="k">bash</span> Miniconda3-latest-Linux-x86_64.sh -b -p /hpc/group/fisherlab/ds555/miniconda3
+
+<span class="c"># 4 ── build the environment from the LINUX spec</span>
+<span class="k">source</span> /hpc/group/fisherlab/ds555/miniconda3/etc/profile.d/conda.sh
+<span class="k">conda</span> env create -f environment_server.yml       <span class="c"># NOT environment.yml</span>
+<span class="k">conda</span> activate pinn_env
+
+<span class="c"># 5 ── the log directory Slurm will not create for you</span>
+<span class="k">mkdir</span> -p slurm/logs
+
+<span class="c"># 6 ── data in place?</span>
+<span class="k">ls</span> -lh data/TSLA_2020_Split_Adjusted.csv
+<span class="c">#     if absent, from your laptop:</span>
+<span class="c">#     scp data/TSLA_2020_Split_Adjusted.csv dcc:/hpc/group/fisherlab/ds555/pinn_code/data/</span>
+
+<span class="c"># 7 ── prove the GPU stack works before committing GPU-hours</span>
+<span class="k">sbatch</span> slurm/run_smoke_test.sh
+<span class="k">squeue</span> -u $USER
+</code></pre>
+
+<p>Step 4 deserves a note. <code>environment_server.yml</code> pins <code>torch==2.2.2+cu121</code>. If <code>nvidia-smi</code> on the GPU nodes reports a driver too old for CUDA 12.1, edit the <code>--index-url</code> to <code>cu118</code> and rebuild. The file's own header comment lists the mapping. Symptom of a mismatch: the environment builds fine, then <code>torch.cuda.is_available()</code> returns <code>False</code> inside a job that did request a GPU.</p>
+
+<p>Step 5 is not optional and cannot be moved into a job script — Slurm opens the log file before your script's first line runs, so a missing <code>slurm/logs/</code> means the job dies leaving no log to explain itself. The <code>submit_*.sh</code> orchestrators call <code>mkdir -p slurm/logs</code> themselves, but a bare <code>sbatch</code> of a leaf script does not.</p>
+
+<h2>2. The two-tier design: run_ vs submit_</h2>
+
+<p>Every script in <code>slurm/</code> is one of two kinds, and the prefix tells you which.</p>
+
+<table>
+  <thead><tr><th style="width:17%">Prefix</th><th style="width:20%">Invoked with</th><th style="width:20%">Runs where</th><th>Job</th></tr></thead>
+  <tbody>
+    <tr><td><code>run_*.sh</code></td><td><code>sbatch slurm/run_x.sh</code></td><td>compute node</td><td><strong>Leaf job.</strong> Has the <code>#SBATCH</code> header, activates conda, resolves its array index to a configuration, and calls one <code>python</code> entry point.</td></tr>
+    <tr><td><code>submit_*.sh</code></td><td><code>bash slurm/submit_x.sh</code></td><td>login node</td><td><strong>Orchestrator.</strong> No <code>#SBATCH</code> header at all. Submits a smoke test, captures its ID, then submits the real array with <code>--dependency=afterok</code>, and prints the task→config map.</td></tr>
+  </tbody>
+</table>
+
+<div class="box warn">
+  <span class="lbl">The most common mistake</span>
+  <p><code>sbatch slurm/submit_w1.sh</code> is wrong — that would queue the orchestrator as a job, and it would try to call <code>sbatch</code> from inside a compute node. Orchestrators are run with <code>bash</code>, directly on the login node. They finish in under a second because all they do is submit. The rule: <strong><code>bash</code> the <code>submit_</code> ones, <code>sbatch</code> the <code>run_</code> ones.</strong></p>
+</div>
+
+<p>The reason for the split is that the dependency chain has to be constructed somewhere, and constructing it requires knowing the smoke test's job ID — which only exists after <code>sbatch</code> returns. That is a login-node activity, and it is cheap. Meanwhile the leaf script stays a clean, self-contained unit you can submit by hand when you want to skip the gate.</p>
+
+<h2>3. Script inventory</h2>
+
+<table>
+  <thead><tr><th style="width:25%">Script</th><th style="width:9%">Tasks</th><th style="width:9%">Time</th><th>What it does</th></tr></thead>
+  <tbody>
+    <tr><td colspan="4" style="background:var(--accent-soft); font-weight:600; padding-top:6px">Orchestrators — <code>bash</code> these</td></tr>
+    <tr><td><code>submit_all.sh</code></td><td>—</td><td>—</td><td>Stage 1: smoke → B0–B12 array (13 tasks).</td></tr>
+    <tr><td><code>submit_stage2.sh</code></td><td>—</td><td>—</td><td>Stage 2: smoke → 2×2 array (4 tasks). Requires Stage 1 complete.</td></tr>
+    <tr><td><code>submit_w1.sh</code></td><td>—</td><td>—</td><td>W1 balancer: smoke → 6-task array. The current active workstream.</td></tr>
+    <tr><td colspan="4" style="background:var(--accent-soft); font-weight:600; padding-top:6px">Leaf jobs — <code>sbatch</code> these</td></tr>
+    <tr><td><code>run_smoke_test.sh</code></td><td>1</td><td>0:30</td><td>Nov2020, 1500 epochs, one config. Verifies GPU + env + val-best snapshot pipeline.</td></tr>
+    <tr><td><code>run_benchmark.sh</code></td><td>13</td><td>4:00</td><td><strong>Stage 1 workhorse.</strong> B0–B12: arch × mode × μ plus five loss-balancing ablations. 15000 epochs, 9 folds each.</td></tr>
+    <tr><td><code>run_stage2_smoke.sh</code></td><td>1</td><td>0:30</td><td>Validates both B10 and B12 warm-starts, C-Vol only, 1000 epochs.</td></tr>
+    <tr><td><code>run_stage2.sh</code></td><td>4</td><td>4:00</td><td>Stage 2: {B10, B12} warm-start × {cvol, avol}. 10000 epochs.</td></tr>
+    <tr><td><code>run_w1_smoke.sh</code></td><td>1</td><td>0:30</td><td>Exercises all three new balancer code paths in sequence, 1500 epochs each.</td></tr>
+    <tr><td><code>run_w1_balancer.sh</code></td><td>6</td><td>2:30</td><td><strong>W1 falsification test.</strong> {no-warmup, warmup5000} × {relobralo, gradnorm_renorm, fixed}, on 3 folds.</td></tr>
+    <tr><td><code>run_w0_audits.sh</code></td><td>1</td><td>0:45</td><td>Analysis only, no training. Physics-fidelity audit + σ-vs-market-IV overlay over existing checkpoints.</td></tr>
+    <tr><td><code>run_history_capture.sh</code></td><td>2</td><td>1:00</td><td>Re-runs B6 and B10 on Nov2020 only, to capture per-epoch history dicts.</td></tr>
+  </tbody>
+</table>
+
+<p>All of them request the same shape of node: <code>--partition=gpu-common --gres=gpu:2080:1 --cpus-per-task=4</code>, with 32 G for full runs and 16 G for smoke tests. That uniformity is deliberate — it means queue behaviour is predictable and you can compare timings across scripts.</p>
+
+<h2>4. RUN_ROOT — the v1/v2 split</h2>
+
+<p>This is the single most consequential convention in the repository, and the one most likely to cause silent damage if misunderstood. The full rationale is in <code>EXPERIMENTS.md</code>; the operational summary is here.</p>
+
+<p>The project is mid-way through changing core methodology — the loss balancer, the selection protocol, and the arbitrage objective are all being replaced. Old results must stay comparable, so they are <strong>frozen</strong>, and new results go to a <strong>separate tree</strong>.</p>
+
+<table>
+  <thead><tr><th style="width:22%"></th><th style="width:39%">v1 — FROZEN</th><th>v2 — ACTIVE</th></tr></thead>
+  <tbody>
+    <tr><td>Loss balancing</td><td>Wang grad-norm, unbounded Σg/gᵢ</td><td>ReLoBRaLo / augmented Lagrangian (W1)</td></tr>
+    <tr><td>Selection</td><td>per-fold val-best argmin</td><td>fixed-budget final-epoch (W3)</td></tr>
+    <tr><td>Arbitrage</td><td>measured only</td><td>trained against (W4)</td></tr>
+    <tr><td>Run outputs</td><td><code>runs/walk_forward/</code>, <code>runs/stage2_*/</code></td><td><code>runs/v2/walk_forward/</code>, <code>runs/v2/stage2_*/</code></td></tr>
+    <tr><td>Reports</td><td><code>reports/v1/</code></td><td><code>reports/v2/</code></td></tr>
+    <tr><td>Status</td><td>complete; matches <code>paper/paper.qmd</code></td><td>in progress</td></tr>
+  </tbody>
+</table>
+
+<p>The mechanism is one environment variable. Each leaf script reads <code>RUN_ROOT</code> with a default, and interpolates it into <code>--output_dir</code>:</p>
+
+<pre><code>RUN_ROOT="${RUN_ROOT:-runs}"           <span class="c"># run_benchmark.sh, run_stage2.sh → default v1</span>
+RUN_ROOT="${RUN_ROOT:-runs/v2}"        <span class="c"># run_w1_balancer.sh → W1 is new work, defaults v2</span>
+
+python run_walk_forward.py ... --output_dir ${RUN_ROOT}/walk_forward
+</code></pre>
+
+<p>So the older scripts reproduce v1 exactly when run bare, and are routed to v2 by prefixing the submission:</p>
+
+<pre><code><span class="c"># v1 reproduction (what already exists — you rarely want this)</span>
+<span class="k">sbatch</span> --array=0-12 slurm/run_benchmark.sh
+
+<span class="c"># v2 — same grid, new methodology, separate tree</span>
+RUN_ROOT=runs/v2 <span class="k">sbatch</span> --array=0-12 slurm/run_benchmark.sh
+</code></pre>
+
+<div class="box warn">
+  <span class="lbl">Never write new methodology into the default tree</span>
+  <p>Forgetting the <code>RUN_ROOT=runs/v2</code> prefix does not error. It writes v2-methodology results into the v1 directory, where <code>build_master_table.py</code> will happily aggregate them alongside genuine v1 rows — producing a master table that silently mixes two methodologies. That corrupts every comparison downstream, including the manuscript's tables, and it is not obvious from the numbers. <strong>Check the <code>Output:</code> line the script echoes before you walk away.</strong></p>
+  <p>Equally: never overwrite <code>reports/v1/</code>. It is the frozen snapshot the paper cites.</p>
+</div>
+
+<p>One subtlety in <code>run_stage2.sh</code>: it reads the warm-start checkpoint from <code>${RUN_ROOT}/walk_forward/...</code> — the <em>same</em> root it writes to. This is intentional. It means <code>RUN_ROOT=runs/v2 sbatch slurm/run_stage2.sh</code> warm-starts from v2 Stage 1 checkpoints, keeping the methodology consistent end to end. It also means v2 Stage 2 will fail if v2 Stage 1 has not been run — the checkpoint directory simply will not exist.</p>
+
+<p>The non-PINN baselines (BS, GAM, laGP) are methodology-independent, so <code>results/{bs,gam,lagp}_baseline/</code> is shared and v2 reuses it. No need to re-run them.</p>
+
+<div class="pagebreak"></div>
+
+<h2>5. Reading run_benchmark.sh line by line</h2>
+
+<p>Every leaf script in this repo follows the same five-part shape. Learn it once here and the rest are obvious.</p>
+
+<h4>Part 1 — the header</h4>
+<pre><code>#SBATCH --job-name=pinn_benchmark
+#SBATCH --partition=gpu-common
+#SBATCH --gres=gpu:2080:1
+#SBATCH --mem=32G
+#SBATCH --cpus-per-task=4
+#SBATCH --time=4:00:00
+#SBATCH --output=slurm/logs/slurm_%A_%a.out
+#SBATCH --error=slurm/logs/slurm_%A_%a.err
+</code></pre>
+<p>Note <code>%A_%a</code> rather than <code>%j</code>: array parent ID plus task index, so the 13 tasks write 13 separate logs. The 4-hour limit covers 9 folds × 15000 epochs on a 2080 with headroom.</p>
+
+<h4>Part 2 — environment</h4>
+<pre><code>cd /hpc/group/fisherlab/ds555/pinn_code
+source /hpc/group/fisherlab/ds555/miniconda3/etc/profile.d/conda.sh
+conda activate pinn_env
+</code></pre>
+<p>Absolute <code>cd</code> first, because a batch job's working directory is not reliably where you submitted from. Then the explicit <code>source</code> — a non-interactive shell never read <code>.bashrc</code>, so the <code>conda</code> function does not exist yet (Guide 1 §5.3).</p>
+
+<h4>Part 3 — output routing</h4>
+<pre><code>RUN_ROOT="${RUN_ROOT:-runs}"
+</code></pre>
+<p>The <code>${VAR:-default}</code> form: use <code>RUN_ROOT</code> from the environment if set and non-empty, otherwise <code>runs</code>. This is what makes the v1/v2 switch a submission-time decision rather than a code edit.</p>
+
+<h4>Part 4 — the index lookup</h4>
+<pre><code>ARCHS=(standard standard modified modified modified modified modified ...)
+MODES=(physics  hybrid   physics  physics  physics  hybrid   hybrid   ...)
+MUS=(   1.0     1.0      0.5      0.75     1.0      0.5      0.75     ...)
+FIXED_DATA=("" "" "" "" "" "" "" "" "" "1000.0" "" "" "")
+WARMUP=(0 0 0 0 0 0 0 0 0 0 5000 5000 5000)
+
+ARCH=${ARCHS[$SLURM_ARRAY_TASK_ID]}
+MODE=${MODES[$SLURM_ARRAY_TASK_ID]}
+MU=${MUS[$SLURM_ARRAY_TASK_ID]}
+FD=${FIXED_DATA[$SLURM_ARRAY_TASK_ID]}
+WU=${WARMUP[$SLURM_ARRAY_TASK_ID]}
+
+EXTRA=""
+[ -n "$FD" ] &amp;&amp; EXTRA="$EXTRA --fixed_data_weight $FD"
+[ "$WU" -gt 0 ] &amp;&amp; EXTRA="$EXTRA --data_loss_warmup $WU"
+</code></pre>
+
+<p>Five parallel arrays, one column per task, positions aligned. The <code>EXTRA</code> accumulator handles optional flags: an empty <code>FIXED_DATA</code> entry contributes nothing, so only task 9 gets <code>--fixed_data_weight</code>, and only tasks 10–12 get <code>--data_loss_warmup</code>. This keeps the command line clean rather than passing sentinel values the Python side would have to interpret.</p>
+
+<p>The B0–B12 grid it encodes:</p>
+
+<table>
+  <thead><tr><th style="width:7%">Task</th><th style="width:8%">ID</th><th style="width:11%">Arch</th><th style="width:11%">Mode</th><th style="width:8%">μ</th><th>Extras / purpose</th></tr></thead>
+  <tbody>
+    <tr><td>0</td><td>B0</td><td>standard</td><td>physics</td><td>1.00</td><td>naive baseline</td></tr>
+    <tr><td>1</td><td>B1</td><td>standard</td><td>hybrid</td><td>1.00</td><td>naive + market data</td></tr>
+    <tr><td>2</td><td>B2</td><td>modified</td><td>physics</td><td>0.50</td><td>μ sweep, physics only</td></tr>
+    <tr><td>3</td><td>B3</td><td>modified</td><td>physics</td><td>0.75</td><td>—</td></tr>
+    <tr><td>4</td><td>B4</td><td>modified</td><td>physics</td><td>1.00</td><td>—</td></tr>
+    <tr><td>5</td><td>B5</td><td>modified</td><td>hybrid</td><td>0.50</td><td>μ sweep, hybrid</td></tr>
+    <tr><td>6</td><td>B6</td><td>modified</td><td>hybrid</td><td>0.75</td><td>old Stage 2 default; the worst v1 drifter</td></tr>
+    <tr><td>7</td><td>B7</td><td>modified</td><td>hybrid</td><td>1.00</td><td>—</td></tr>
+    <tr><td>8</td><td>B8</td><td>modified</td><td>hybrid</td><td>0.00</td><td>fix #1 — kill RWF init blowup</td></tr>
+    <tr><td>9</td><td>B9</td><td>modified</td><td>hybrid</td><td>0.75</td><td><code>--fixed_data_weight 1000</code> — decouple data from grad-norm</td></tr>
+    <tr><td>10</td><td>B10</td><td>modified</td><td>hybrid</td><td>0.75</td><td><code>--data_loss_warmup 5000</code> — best v1 RMSE</td></tr>
+    <tr><td>11</td><td>B11</td><td>modified</td><td>hybrid</td><td>0.50</td><td>warmup 5000 — μ-down + warmup</td></tr>
+    <tr><td>12</td><td>B12</td><td>modified</td><td>hybrid</td><td>0.25</td><td>warmup 5000 — cleanest PDE surface</td></tr>
+  </tbody>
+</table>
+
+<h4>Part 5 — echo, then run</h4>
+<pre><code>echo "Config: arch=$ARCH  mode=$MODE  μ=$MU  extras=[$EXTRA]"
+
+python run_walk_forward.py \
+    --arch $ARCH --mode $MODE --rwf_mu $MU \
+    --epochs 15000 --val_months 1 --seed 42 \
+    --output_dir ${RUN_ROOT}/walk_forward \
+    $EXTRA
+</code></pre>
+
+<p>The <code>echo</code> of the <em>resolved</em> configuration is not decoration. It is the record that lets you confirm, from the log alone, that task 9 really did get <code>--fixed_data_weight 1000</code> — which is the only practical defence against a misaligned parallel array. Always echo the resolved config, never just the task index.</p>
+
+<h2>6. Runthrough A — W1 balancer, end to end</h2>
+
+<p>This is the currently active workstream. The question it answers: does <em>bounding</em> the loss balancer kill the λ_data runaway and stop hybrid mode degrading relative to physics? (See <code>docs/TRAINING_VALIDATION_DISCUSSION.md</code> P1 and <code>docs/TODO.md</code> W1.)</p>
+
+<h4>Step 1 — submit</h4>
+<pre><code><span class="k">cd</span> /hpc/group/fisherlab/ds555/pinn_code
+<span class="k">git</span> pull
+<span class="k">bash</span> slurm/submit_w1.sh
+</code></pre>
+
+<p>Output:</p>
+<pre><code>=== Submitting W1 smoke test (relobralo / gradnorm_renorm / fixed) ===
+Smoke job ID: 2891044
+
+=== Submitting W1 balancer array (6 tasks, depends on smoke) ===
+W1 array job ID: 2891045
+
+Monitor with:  squeue -u ds555
+Watch logs:    tail -f slurm/logs/w1_2891045_0.out
+
+Task 0: no-warmup   × relobralo
+Task 1: no-warmup   × gradnorm_renorm
+Task 2: no-warmup   × fixed
+Task 3: warmup=5000 × relobralo
+Task 4: warmup=5000 × gradnorm_renorm
+Task 5: warmup=5000 × fixed
+</code></pre>
+
+<p>Both submissions happen instantly. The array sits <code>PD</code> with reason <code>Dependency</code> until the smoke test exits 0.</p>
+
+<h4>Step 2 — watch the gate</h4>
+<pre><code><span class="k">squeue</span> -u $USER
+<span class="k">tail</span> -f slurm/logs/w1_smoke_2891044.out
+</code></pre>
+
+<p>The smoke test runs all three balancers in sequence on Nov2020 at 1500 epochs — chosen because 1500 exceeds <code>grad_norm_freq</code> (1000), so the balancer fires twice, and <code>--data_loss_warmup 200</code> makes the warmup→hybrid transition happen early enough to be exercised. It has <code>set -e</code>, so any balancer failing aborts the whole thing and the array never starts.</p>
+
+<div class="box warn">
+  <span class="lbl">If the smoke fails</span>
+  <p>The array does not fail — it hangs in <code>PD</code> with <code>DependencyNeverSatisfied</code>, permanently. Read <code>slurm/logs/w1_smoke_*.err</code>, then:</p>
+  <pre style="margin-bottom:0"><code><span class="k">scancel</span> 2891045          <span class="c"># kill the orphaned array</span>
+<span class="c"># fix the problem, commit, then re-run: bash slurm/submit_w1.sh</span></code></pre>
+</div>
+
+<h4>Step 3 — the array runs</h4>
+
+<p>Six tasks, each: modified hybrid, μ=0.75, 15000 epochs, folds Aug2020/Oct2020/Nov2020, <code>--track_test_curve</code> on. Those three folds are where B6's hybrid degradation was clearest; Oct additionally stresses the September validation mismatch. Outputs land in:</p>
+
+<pre><code>runs/v2/walk_forward/modified_hybrid_mu0.75_&lt;balancer&gt;/
+runs/v2/walk_forward/modified_hybrid_mu0.75_warmup5000_&lt;balancer&gt;/
+</code></pre>
+
+<p>No control runs are needed — the existing v1 grad-norm runs of B6 (no warmup) and B10 (warmup) on the same folds <em>are</em> the control.</p>
+
+<h4>Step 4 — check the acceptance criterion</h4>
+
+<p>W1 has a specific pass condition, and it is not "RMSE improved". Per <code>docs/TODO.md</code>:</p>
+
+<ol>
+  <li><strong>Weight trajectories PLATEAU.</strong> The λ multipliers must converge rather than run away — this is the actual defect being fixed. Plot them from the saved history dicts.</li>
+  <li><strong>Hybrid stops degrading vs physics</strong> on the same folds.</li>
+</ol>
+
+<p>A run where RMSE improves but λ_data still climbs to 10⁵ has not passed. The numerical-error defect is the target; a lucky RMSE is not evidence.</p>
+
+<h4>Step 5 — aggregate and compare</h4>
+<pre><code><span class="k">python</span> scripts/build_master_table.py --runs_dir runs/v2 --output_dir reports/v2 --label v2
+<span class="k">python</span> scripts/compare_methodologies.py
+</code></pre>
+
+<p>Both are light enough for the login node. Then pull the results down:</p>
+<pre><code><span class="c"># from your laptop</span>
+<span class="k">rsync</span> -avz dcc:/hpc/group/fisherlab/ds555/pinn_code/reports/ ./reports/
+</code></pre>
+
+<h2>7. Runthrough B — Stage 1 → Stage 2</h2>
+
+<p>The full pipeline, as originally executed for v1. To reproduce it under the new methodology, prefix every <code>sbatch</code> with <code>RUN_ROOT=runs/v2</code>.</p>
+
+<div class="flow">
+<strong>bash slurm/submit_all.sh</strong>
+   ├─ sbatch run_smoke_test.sh          → job S       (~5 min)
+   └─ sbatch --array=0-12
+        --dependency=afterok:S
+        run_benchmark.sh                → array A     (13 × up to 4 h)
+                │
+                ▼   (wait for A to finish — check with sacct)
+<strong>bash slurm/submit_stage2.sh</strong>
+   ├─ sbatch run_stage2_smoke.sh        → job S2      (~10 min)
+   └─ sbatch --array=0-3
+        --dependency=afterok:S2
+        run_stage2.sh                   → array B     (4 × up to 4 h)
+                │
+                ▼
+<strong>python scripts/build_master_table.py</strong>
+</div>
+
+<h4>Stage 1</h4>
+<pre><code><span class="k">bash</span> slurm/submit_all.sh
+
+<span class="c"># confirm all 13 tasks completed before going further</span>
+<span class="k">sacct</span> -j &lt;array-id&gt; --format=JobID,JobName%20,State,Elapsed | <span class="k">grep</span> -v "\.batch\|\.extern"
+</code></pre>
+
+<p>Stage 2 warm-starts from Stage 1 checkpoints, so a Stage 1 task that failed means the corresponding Stage 2 task will fail too — with a missing-directory error rather than anything informative. Verify completion first; re-run any failed indices (§11.1).</p>
+
+<h4>Stage 2</h4>
+<pre><code><span class="k">bash</span> slurm/submit_stage2.sh
+</code></pre>
+
+<p>Four tasks — two warm-start sources crossed with two volatility parameterizations:</p>
+
+<table>
+  <thead><tr><th style="width:8%">Task</th><th style="width:26%">Warm-start</th><th style="width:12%">Vol type</th><th>Output</th></tr></thead>
+  <tbody>
+    <tr><td>0</td><td>B10 (μ=0.75) — best RMSE</td><td>cvol</td><td><code>runs/stage2_B10/cvol</code></td></tr>
+    <tr><td>1</td><td>B10 (μ=0.75)</td><td>avol</td><td><code>runs/stage2_B10/avol</code></td></tr>
+    <tr><td>2</td><td>B12 (μ=0.25) — cleanest PDE</td><td>cvol</td><td><code>runs/stage2_B12/cvol</code></td></tr>
+    <tr><td>3</td><td>B12 (μ=0.25)</td><td>avol</td><td><code>runs/stage2_B12/avol</code></td></tr>
+  </tbody>
+</table>
+
+<p><code>cvol</code> is the multiplicative parameterization, <code>avol</code> the direct one. Both use <code>--pricing_lr 1e-4 --vol_lr 1e-3</code>: the pricing net is fine-tuned gently since it arrives pre-trained, while the vol net starts fresh and needs a faster rate.</p>
+
+<h2>8. Runthrough C — W0 audits (no training)</h2>
+
+<p><code>run_w0_audits.sh</code> is the one script that trains nothing. It loads existing v1 checkpoints and evaluates them on a dense grid: a physics-fidelity audit (PINN vs analytic Black–Scholes, plus arbitrage severity) and a σ_θ-versus-market-IV overlay asking whether Stage 2 learned real volatility.</p>
+
+<pre><code><span class="c"># defaults: the data-rich folds</span>
+<span class="k">sbatch</span> slurm/run_w0_audits.sh
+
+<span class="c"># override the subsets via environment variables</span>
+FIDELITY_FOLDS=all <span class="k">sbatch</span> slurm/run_w0_audits.sh
+OVERLAY_FOLDS=Nov2020 <span class="k">sbatch</span> slurm/run_w0_audits.sh
+FIDELITY_CONFIGS="modified_physics_mu0.75" FIDELITY_FOLDS=Nov2020 <span class="k">sbatch</span> slurm/run_w0_audits.sh
+</code></pre>
+
+<p>Same <code>${VAR:-default}</code> idiom as <code>RUN_ROOT</code>, applied to fold and config subsets. Outputs go to <code>reports/diagnostic/</code> — CSVs merge across re-runs, PNGs overwrite.</p>
+
+<p>These take minutes rather than hours, which makes them tempting to run on the login node. Don't: they load checkpoints and evaluate on a dense grid, which is exactly the kind of memory-hungry work login nodes are not for. The script's own header documents the interactive alternative if you want to iterate on them.</p>
+
+<h2>9. Runthrough D — interactive debugging</h2>
+
+<p>When you are changing training code and want a fast edit-run-crash loop:</p>
+
+<pre><code><span class="c"># On the login node, start tmux FIRST so a dropped connection doesn't kill the allocation</span>
+<span class="k">tmux</span> new -s pinn
+
+<span class="k">srun</span> --partition=gpu-common --gres=gpu:2080:1 \
+     --mem=16G --cpus-per-task=4 --time=1:00:00 --pty bash
+
+<span class="c"># now on a compute node</span>
+<span class="k">cd</span> /hpc/group/fisherlab/ds555/pinn_code
+<span class="k">source</span> /hpc/group/fisherlab/ds555/miniconda3/etc/profile.d/conda.sh
+<span class="k">conda</span> activate pinn_env
+<span class="k">python</span> -c "import torch; print('CUDA:', torch.cuda.is_available())"
+
+<span class="c"># tiny run — one fold, few epochs, transient output dir</span>
+<span class="k">python</span> run_walk_forward.py \
+    --arch modified --mode hybrid --rwf_mu 0.75 \
+    --balancer relobralo --folds Nov2020 --epochs 300 \
+    --data_loss_warmup 50 --output_dir runs/v2/smoke --track_test_curve
+
+<span class="k">exit</span>        <span class="c"># release the GPU. Detach tmux with Ctrl-b d if you want to keep the shell.</span>
+</code></pre>
+
+<p>Use <code>runs/v2/smoke</code> for this — it is gitignored, so scratch runs never pollute the results tree or show up in a commit. The same applies to <code>runs/smoke/</code>, <code>runs/stage2_smoke/</code>, and <code>runs/v2/stage2_smoke/</code>.</p>
+
+<h2>10. Monitoring while jobs run</h2>
+
+<pre><code><span class="c"># the queue, refreshing</span>
+<span class="k">watch</span> -n 30 "squeue -u $USER"
+
+<span class="c"># follow one array task's stdout</span>
+<span class="k">tail</span> -f slurm/logs/w1_2891045_0.out
+
+<span class="c"># which tasks of an array are done, and how they ended</span>
+<span class="k">sacct</span> -j 2891045 --format=JobID,State,Elapsed,MaxRSS
+
+<span class="c"># resource efficiency, once finished — feeds your next --mem/--time choice</span>
+<span class="k">seff</span> 2891045_0
+
+<span class="c"># quick scan of all six tasks for errors</span>
+<span class="k">grep</span> -l "Error\|Traceback" slurm/logs/w1_2891045_*.err
+
+<span class="c"># confirm output actually landed where intended</span>
+<span class="k">ls</span> -la runs/v2/walk_forward/
+</code></pre>
+
+<p>The log naming conventions, so you know what to <code>tail</code>:</p>
+
+<table>
+  <thead><tr><th style="width:34%">Pattern</th><th>Produced by</th></tr></thead>
+  <tbody>
+    <tr><td><code>slurm/logs/slurm_%A_%a.out</code></td><td><code>run_benchmark.sh</code> — Stage 1 array</td></tr>
+    <tr><td><code>slurm/logs/s2_%A_%a.out</code></td><td><code>run_stage2.sh</code></td></tr>
+    <tr><td><code>slurm/logs/w1_%A_%a.out</code></td><td><code>run_w1_balancer.sh</code></td></tr>
+    <tr><td><code>slurm/logs/w0_%j.out</code></td><td><code>run_w0_audits.sh</code> (single job, so <code>%j</code>)</td></tr>
+    <tr><td><code>slurm/logs/smoke_%j.out</code>, <code>w1_smoke_%j.out</code>, <code>s2_smoke_%j.out</code></td><td>the smoke tests</td></tr>
+    <tr><td><code>slurm/logs/hist_%A_%a.out</code></td><td><code>run_history_capture.sh</code></td></tr>
+  </tbody>
+</table>
+
+<div class="pagebreak"></div>
+
+<h2>11. Recipes</h2>
+
+<h3>11.1 Re-run only the failed tasks of an array</h3>
+<pre><code><span class="k">sacct</span> -j 2891045 --format=JobID,State | <span class="k">grep</span> -E "FAILED|TIMEOUT"
+<span class="c"># suppose tasks 2 and 5 failed:</span>
+RUN_ROOT=runs/v2 <span class="k">sbatch</span> --array=2,5 slurm/run_w1_balancer.sh
+</code></pre>
+<p>Index N always maps to the same configuration, so this reproduces exactly the failed cells. Remember to carry the <code>RUN_ROOT</code> prefix — a re-run without it writes to the wrong tree.</p>
+
+<h3>11.2 One config, no array</h3>
+<pre><code><span class="k">sbatch</span> --array=10 slurm/run_benchmark.sh      <span class="c"># just B10, via the array machinery</span>
+</code></pre>
+<p>A single-element array keeps the index-lookup path intact, so you get exactly the documented configuration rather than a hand-typed approximation of it.</p>
+
+<h3>11.3 Override a resource limit without editing the script</h3>
+<pre><code><span class="k">sbatch</span> --time=8:00:00 --mem=64G --array=0-5 slurm/run_w1_balancer.sh
+</code></pre>
+<p>Command-line flags beat <code>#SBATCH</code> lines. This is how you rescue a TIMEOUT without a commit-and-revert cycle on a version-controlled script.</p>
+
+<h3>11.4 Add a new configuration to the grid</h3>
+<p>Append one element to <strong>every</strong> parallel array, then extend the range:</p>
+<pre><code>ARCHS=(... modified)     <span class="c"># now 14 entries</span>
+MODES=(... hybrid)       <span class="c"># now 14 entries</span>
+MUS=(...   0.10)         <span class="c"># now 14 entries</span>
+FIXED_DATA=(... "")      <span class="c"># now 14 entries — the empty string matters</span>
+WARMUP=(... 5000)        <span class="c"># now 14 entries</span>
+</code></pre>
+<pre><code><span class="k">sbatch</span> --array=13 slurm/run_benchmark.sh    <span class="c"># run only the new cell</span>
+</code></pre>
+<p>Then update the header comment's task→config map. The failure mode of skipping an array is silent: a missing element expands to empty, and the run proceeds with a subtly wrong command line. Verify from the log's <code>Config:</code> echo before trusting the result.</p>
+
+<h3>11.5 Run a v2 sweep of the full Stage 1 grid</h3>
+<pre><code>RUN_ROOT=runs/v2 <span class="k">sbatch</span> --array=0-12 slurm/run_benchmark.sh
+RUN_ROOT=runs/v2 <span class="k">sbatch</span> --array=0-3  slurm/run_stage2.sh    <span class="c"># after the above completes</span>
+<span class="k">python</span> scripts/build_master_table.py --runs_dir runs/v2 --output_dir reports/v2 --label v2
+<span class="k">python</span> scripts/compare_methodologies.py
+</code></pre>
+
+<h3>11.6 Throttle a wide array</h3>
+<pre><code><span class="k">sbatch</span> --array=0-12%4 slurm/run_benchmark.sh    <span class="c"># at most 4 running at once</span>
+</code></pre>
+<p>Worth doing on <code>gpu-common</code> during busy periods — 13 simultaneous GPU requests is a lot to ask of a shared pool, and throttling costs you little since they queue anyway.</p>
+
+<h3>11.7 Email on completion</h3>
+<pre><code><span class="k">sbatch</span> --mail-type=END,FAIL --mail-user=ds555@duke.edu --array=0-5 slurm/run_w1_balancer.sh
+</code></pre>
+<p>With an array, <code>--mail-type=END</code> emails per task — thirteen emails from a Stage 1 sweep. <code>FAIL</code> alone is usually the humane setting.</p>
+
+<h2>12. Writing a new job script</h2>
+
+<p>Copy an existing leaf script rather than starting blank; the boilerplate is the part that is easy to get subtly wrong. A minimal template that matches this project's conventions:</p>
+
+<pre><code>#!/bin/bash
+<span class="c"># ============================================================</span>
+<span class="c"># &lt;What question does this answer? Link the doc section.&gt;</span>
+<span class="c">#</span>
+<span class="c"># Task → config:</span>
+<span class="c">#   0: ...</span>
+<span class="c">#   1: ...</span>
+<span class="c">#</span>
+<span class="c"># Submit:  RUN_ROOT=runs/v2 sbatch --array=0-1 slurm/run_wX.sh</span>
+<span class="c"># ACCEPTANCE: &lt;what result would falsify the hypothesis?&gt;</span>
+<span class="c"># ============================================================</span>
+
+#SBATCH --job-name=pinn_wX
+#SBATCH --partition=gpu-common
+#SBATCH --gres=gpu:2080:1
+#SBATCH --mem=32G
+#SBATCH --cpus-per-task=4
+#SBATCH --time=2:30:00
+#SBATCH --output=slurm/logs/wX_%A_%a.out
+#SBATCH --error=slurm/logs/wX_%A_%a.err
+
+cd /hpc/group/fisherlab/ds555/pinn_code
+source /hpc/group/fisherlab/ds555/miniconda3/etc/profile.d/conda.sh
+conda activate pinn_env
+
+RUN_ROOT="${RUN_ROOT:-runs/v2}"          <span class="c"># new work defaults to v2</span>
+
+PARAM_A=(val0 val1)
+A=${PARAM_A[$SLURM_ARRAY_TASK_ID]}
+
+echo "Job $SLURM_JOB_ID task $SLURM_ARRAY_TASK_ID on $SLURMD_NODENAME"
+echo "GPU:    $(nvidia-smi --query-gpu=name --format=csv,noheader 2&gt;/dev/null)"
+echo "Config: param_a=$A"
+echo "Output: ${RUN_ROOT}/walk_forward"
+
+python run_walk_forward.py --some_flag $A --output_dir ${RUN_ROOT}/walk_forward
+
+echo "Done: $(date)"
+</code></pre>
+
+<p>The conventions worth preserving, and why:</p>
+
+<ul>
+  <li><strong>A header comment stating the question and the acceptance criterion.</strong> The scripts in <code>slurm/</code> do this consistently, and it is what makes them readable a year later. <code>run_w1_balancer.sh</code> is the model — it names the hypothesis, the control, the folds and why those folds, and what result would count as a pass.</li>
+  <li><strong>New work defaults <code>RUN_ROOT</code> to <code>runs/v2</code>.</strong> Then forgetting the prefix is harmless rather than corrupting.</li>
+  <li><strong>Echo the resolved config, not the index.</strong> Your only defence against misaligned arrays.</li>
+  <li><strong>Put new balancers and penalties behind CLI flags</strong> (per <code>CLAUDE.md</code>), so completed runs stay reproducible when defaults change.</li>
+  <li><strong>Write a smoke test alongside it</strong> and gate the array with <code>afterok</code>. A 6-task array at 2.5 hours is 15 GPU-hours; a five-minute gate is cheap insurance.</li>
+</ul>
+
+<h2>13. Project-specific hazards</h2>
+
+<table>
+  <thead><tr><th style="width:30%">Hazard</th><th>Why it bites, and what to do</th></tr></thead>
+  <tbody>
+    <tr><td><code>sbatch</code>-ing a <code>submit_*.sh</code></td><td>Orchestrators have no <code>#SBATCH</code> header and call <code>sbatch</code> themselves. Use <code>bash</code>.</td></tr>
+    <tr><td>Missing <code>RUN_ROOT=runs/v2</code></td><td>Silently mixes methodologies in the v1 tree and corrupts the master table. Check the <code>Output:</code> line in the log.</td></tr>
+    <tr><td>Overwriting <code>reports/v1/</code></td><td>Frozen snapshot the manuscript cites. Direct new aggregations to <code>reports/v2/</code> with <code>--output_dir</code>.</td></tr>
+    <tr><td>Stage 2 before Stage 1</td><td>Warm-start checkpoint directory won't exist. Verify all 13 Stage 1 tasks are <code>COMPLETED</code> first.</td></tr>
+    <tr><td>v2 Stage 2 off v1 Stage 1</td><td><code>run_stage2.sh</code> reads warm-starts from the same <code>RUN_ROOT</code> it writes to — by design. Run v2 Stage 1 first, or you get a missing-directory error.</td></tr>
+    <tr><td>Misaligned parallel arrays</td><td>Missing element → empty string → wrong or malformed command line, no error. Count every array when extending; read the <code>Config:</code> echo.</td></tr>
+    <tr><td>Using <code>environment.yml</code></td><td>macOS-only; won't resolve on Linux. Always <code>environment_server.yml</code>.</td></tr>
+    <tr><td>CUDA version mismatch</td><td>Env builds, then <code>torch.cuda.is_available()</code> is <code>False</code>. Match the wheel's <code>--index-url</code> to the node driver.</td></tr>
+    <tr><td>Treating <code>track_test_curve</code> as selection</td><td><strong>Test data is sacred</strong> (<code>CLAUDE.md</code>): each test month is evaluated once per fold. <code>--track_test_curve</code> is diagnostic only — it informs the W3 protocol decision, never model selection.</td></tr>
+    <tr><td>Missing <code>slurm/logs/</code></td><td>Job dies with no log at all. <code>mkdir -p slurm/logs</code>. The orchestrators do it; a bare <code>sbatch</code> does not.</td></tr>
+    <tr><td>Scratch runs in the results tree</td><td>Use <code>runs/v2/smoke</code> — gitignored. <code>runs/walk_forward/</code> is committed.</td></tr>
+  </tbody>
+</table>
+
+<div class="box ok">
+  <span class="lbl">Before you submit anything expensive</span>
+  <ol style="margin-bottom:0">
+    <li><code>git pull</code> — the cluster copy is current</li>
+    <li><code>mkdir -p slurm/logs</code></li>
+    <li>Decide <code>RUN_ROOT</code>: is this v1 reproduction or v2 methodology?</li>
+    <li>Smoke test first, gated with <code>--dependency=afterok</code></li>
+    <li>Confirm the log's <code>Config:</code> and <code>Output:</code> lines match your intent</li>
+    <li><code>seff</code> the first completed task and adjust limits for the rest</li>
+  </ol>
+</div>
+
+<hr class="soft">
+
+<p class="small"><strong>Related documents.</strong> <code>EXPERIMENTS.md</code> — the v1/v2 output policy in full. <code>docs/TODO.md</code> — live status and the W0–W7 workstreams. <code>docs/HYBRID_PARETO_PLAN.md</code> — plan of record; §0 locked decisions, §4 sequencing. <code>docs/TRAINING_VALIDATION_DISCUSSION.md</code> — the P1–P5 defect analysis that motivates W1. <code>CLAUDE.md</code> — code conventions and diagnostic requirements.</p>

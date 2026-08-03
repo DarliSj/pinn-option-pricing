@@ -1,0 +1,614 @@
+<title>Using the Duke Compute Cluster — A Working Guide</title>
+<link rel="stylesheet" href="style.css">
+
+<div class="titleblock">
+  <p class="kicker">Guide 1 of 2 &nbsp;·&nbsp; Cluster fundamentals</p>
+  <h1>Using the Duke Compute Cluster</h1>
+  <p class="subtitle">SSH, filesystems, Slurm, GPUs, and the batch-job lifecycle — with runnable examples.</p>
+  <p class="meta">Companion: <em>Guide 2 — PINN Cluster Scripts</em> (this project's <code>slurm/</code> tree) &nbsp;|&nbsp; Group: <code>fisherlab</code> &nbsp;|&nbsp; Drafted 2026-08-02</p>
+</div>
+
+<div class="box warn">
+  <span class="lbl">Verify before you rely on it</span>
+  <p>Cluster configuration drifts — partition names, GPU inventory, quotas and time limits change without notice. Everything in this guide that is <em>site-specific</em> (host names, partitions, paths, quotas) is marked with a <strong>check command</strong> you can run to confirm the current truth. The authoritative source is Duke OIT's DCC documentation and <code>oit-rc-help@duke.edu</code>; this guide is a working companion, not a replacement.</p>
+</div>
+
+<div class="toc">
+  <ol>
+    <li>The mental model: login vs compute</li>
+    <li>Getting on: SSH and OnDemand</li>
+    <li>Where your files live</li>
+    <li>Partitions, accounts, and GPUs</li>
+    <li>Software: modules and conda</li>
+    <li>Anatomy of an sbatch script</li>
+    <li>The five commands you actually use</li>
+    <li>Interactive sessions</li>
+    <li>Job arrays</li>
+    <li>Job dependencies</li>
+    <li>Right-sizing your requests</li>
+    <li>Moving data in and out</li>
+    <li>Troubleshooting table</li>
+    <li>Etiquette and the checklist</li>
+  </ol>
+</div>
+
+<h2>1. The mental model: login vs compute</h2>
+
+<p>A cluster is not one computer. It is three distinct things that beginners routinely conflate, and almost every "why did my job die" question traces back to confusing them.</p>
+
+<table>
+  <thead><tr><th style="width:20%">Layer</th><th style="width:38%">What it is</th><th>What you may do there</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Login node</strong></td><td>The shared machine you land on after <code>ssh</code>. A handful of cores shared by <em>everyone</em> logged in right now.</td><td>Edit files, <code>git</code>, submit jobs, inspect small outputs, <code>tail</code> logs. Nothing that runs longer than ~a minute or uses real memory.</td></tr>
+    <tr><td><strong>Scheduler</strong> (Slurm)</td><td>A queue and a resource accountant. You describe a job; it finds a node that fits and runs it there.</td><td>Interact only through commands: <code>sbatch</code>, <code>squeue</code>, <code>scancel</code>, <code>sacct</code>, <code>srun</code>.</td></tr>
+    <tr><td><strong>Compute nodes</strong></td><td>The actual workhorses — many cores, lots of RAM, GPUs on some. You never SSH to them directly; Slurm places you there.</td><td>Everything expensive: training, long analyses, anything touching a GPU.</td></tr>
+  </tbody>
+</table>
+
+<p>The single rule that follows from this: <strong>never run your training script directly on the login node.</strong> It will either be killed by the node's resource watchdog, or — worse — it will not be killed and will degrade the login node for every other person on the cluster. If you catch yourself typing <code>python run_walk_forward.py</code> right after <code>ssh</code>, stop.</p>
+
+<div class="flow">
+you ──ssh──▶ <strong>login node</strong>
+                │
+                │  sbatch job.sh          ("here is what I need")
+                ▼
+           <strong>Slurm scheduler</strong>  ──── queue ────▶ waits for a fitting node
+                │
+                │  allocates: 1 GPU, 4 CPUs, 32G, 4 hours
+                ▼
+           <strong>compute node</strong>  ──▶ runs your script ──▶ writes to shared storage
+                                                       │
+you ◀── read logs / results ───────────────────────────┘
+</div>
+
+<p>Notice the last arrow: storage is <em>shared</em>. The compute node sees the same <code>/hpc/group/...</code> directory as the login node, which is why you do not need to copy anything to the compute node. Write your results to shared storage and they are simply there when the job finishes.</p>
+
+<h2>2. Getting on: SSH and OnDemand</h2>
+
+<h3>2.1 SSH from a terminal</h3>
+
+<pre><code><span class="c"># from your laptop — replace ds555 with your NetID</span>
+<span class="k">ssh</span> ds555@dcc-login.oit.duke.edu
+</code></pre>
+
+<p>You will be prompted for your Duke password and then for multi-factor authentication. Off the Duke network you generally need the Duke VPN running first.</p>
+
+<p>Typing that host and doing MFA a dozen times a day gets old fast. Two fixes, both on your laptop:</p>
+
+<h4>An SSH config alias</h4>
+
+<p>Put this in <code>~/.ssh/config</code> on your <em>laptop</em>:</p>
+
+<pre><code>Host dcc
+    HostName dcc-login.oit.duke.edu
+    User ds555
+    ServerAliveInterval 60
+    ControlMaster auto
+    ControlPath ~/.ssh/cm-%r@%h:%p
+    ControlPersist 8h
+</code></pre>
+
+<p>Now <code>ssh dcc</code> is enough. The three <code>Control*</code> lines are the part worth understanding: the first connection opens a master channel that stays alive for 8 hours, and every subsequent <code>ssh dcc</code>, <code>scp</code>, or <code>rsync</code> rides that existing channel — no password, no MFA. <code>ServerAliveInterval</code> keeps the channel from being dropped by an idle timeout.</p>
+
+<h4>An SSH key</h4>
+
+<pre><code><span class="c"># laptop — generate once, if you don't already have a key</span>
+<span class="k">ssh-keygen</span> -t ed25519 -C "ds555@duke.edu"
+
+<span class="c"># copy the public half to the cluster</span>
+<span class="k">ssh-copy-id</span> dcc
+</code></pre>
+
+<p>Duke may still require MFA on top of the key depending on current policy; the key at minimum removes the password step.</p>
+
+<h3>2.2 OnDemand (the browser route)</h3>
+
+<p>DCC provides an Open OnDemand portal — typically at <code>dcc-ondemand.oit.duke.edu</code> — which gives you, in a browser: a file manager, a terminal, and "interactive apps" such as JupyterLab or an RStudio session running <em>on a compute node</em>. Two things it is genuinely good for:</p>
+
+<ul>
+  <li><strong>Looking at figures.</strong> Your job writes a PNG into <code>reports/</code>; you click it in the file manager instead of <code>scp</code>-ing it down.</li>
+  <li><strong>Exploratory notebook work on a GPU.</strong> Launching a Jupyter session through OnDemand submits a real Slurm job, so the notebook kernel has the GPU and memory you asked for. This is the correct way to prototype interactively — much better than fighting <code>srun</code> plus port forwarding.</li>
+</ul>
+
+<p>It is not good for launching production runs. Those belong in <code>sbatch</code> scripts, in git, so they are reproducible six months later.</p>
+
+<h2>3. Where your files live</h2>
+
+<p>DCC exposes several filesystems with very different sizes, speeds, and persistence guarantees. Putting the wrong thing in the wrong place is the second-most-common source of pain after the login-node mistake.</p>
+
+<table>
+  <thead><tr><th style="width:24%">Path</th><th style="width:12%">Typical size</th><th style="width:14%">Persistence</th><th>Use it for</th></tr></thead>
+  <tbody>
+    <tr><td><code>/hpc/home/&lt;netid&gt;</code></td><td>small (a few GB)</td><td>backed up</td><td>Dotfiles, SSH keys, tiny scripts. <strong>Not</strong> code repos, not data, not conda envs — you will hit the quota and jobs will fail in confusing ways.</td></tr>
+    <tr><td><code>/hpc/group/&lt;lab&gt;</code><br><span class="small">e.g. <code>/hpc/group/fisherlab</code></span></td><td>large (TB-scale, purchased)</td><td>persistent</td><td><strong>The default home for real work.</strong> Code, conda environments, datasets, run outputs, checkpoints. This project lives at <code>/hpc/group/fisherlab/ds555/pinn_code</code>.</td></tr>
+    <tr><td><code>/work</code> or scratch</td><td>very large</td><td><strong>auto-purged</strong></td><td>High-throughput temporary I/O — intermediate files a job writes then re-reads. Assume anything untouched for a few weeks is deleted. Never the only copy of a result.</td></tr>
+    <tr><td><code>/tmp</code> (node-local)</td><td>modest</td><td>gone at job end</td><td>Per-job scratch that never needs to leave the node. Fastest option, since it is a local disk rather than the network filesystem.</td></tr>
+  </tbody>
+</table>
+
+<div class="box">
+  <span class="lbl">Check command</span>
+  <p>Confirm your actual quotas and what exists — do not trust the table above blindly:</p>
+  <pre style="margin-top:6px; margin-bottom:0"><code><span class="k">quota</span> -s                              <span class="c"># home directory usage</span>
+<span class="k">df</span> -h /hpc/group/fisherlab            <span class="c"># group space free/used</span>
+<span class="k">du</span> -sh /hpc/group/fisherlab/ds555/*   <span class="c"># what is eating your share</span>
+<span class="k">ls</span> -d /work /scratch 2>/dev/null      <span class="c"># which scratch paths exist here</span></code></pre>
+</div>
+
+<h3>3.1 Why conda environments must not live in home</h3>
+
+<p>A PyTorch-with-CUDA environment is several gigabytes. Home quota is typically smaller than that. So the miniconda installation for this project deliberately sits in group space:</p>
+
+<pre><code>/hpc/group/fisherlab/ds555/miniconda3/
+</code></pre>
+
+<p>which is exactly the path every job script in <code>slurm/</code> sources. If you install miniconda into <code>~</code> by accepting the installer default, you will fill your home quota, and the symptom will not be "disk full" — it will be a torch import failing, or a job dying at epoch 3000 when it tries to write a checkpoint. Install to group space.</p>
+
+<h2>4. Partitions, accounts, and GPUs</h2>
+
+<p>A <strong>partition</strong> is a named pool of nodes with its own rules: which hardware, how long jobs may run, who may submit. You pick one with <code>--partition</code>.</p>
+
+<table>
+  <thead><tr><th style="width:22%">Partition</th><th style="width:14%">Hardware</th><th>Character</th></tr></thead>
+  <tbody>
+    <tr><td><code>common</code></td><td>CPU only</td><td>The general-purpose CPU pool, open to all Duke users. Where analysis and aggregation jobs belong.</td></tr>
+    <tr><td><code>gpu-common</code></td><td>GPU</td><td>The general GPU pool. <strong>Every job script in this project uses this one.</strong> Expect to queue during busy periods.</td></tr>
+    <tr><td><code>&lt;lab&gt;</code> / <code>&lt;lab&gt;-gpu</code></td><td>varies</td><td>Nodes your lab purchased. Highest priority for lab members, but only if the lab owns nodes.</td></tr>
+    <tr><td><code>scavenger</code>, <code>scavenger-gpu</code></td><td>varies</td><td>Idle capacity from other groups' nodes. Often near-zero wait — but your job is <strong>preempted (killed) without warning</strong> when the owner needs the node. Only for work that checkpoints, or short work you don't mind losing.</td></tr>
+  </tbody>
+</table>
+
+<div class="box">
+  <span class="lbl">Check command</span>
+  <pre style="margin-bottom:0"><code><span class="k">sinfo</span> -s                                          <span class="c"># all partitions, node counts, states</span>
+<span class="k">sinfo</span> -p gpu-common -o "%20N %10c %10m %25G %10T"   <span class="c"># nodes / cores / mem / GRES / state</span>
+<span class="k">scontrol</span> show partition gpu-common                 <span class="c"># limits, incl. MaxTime and DefaultTime</span></code></pre>
+</div>
+
+<h3>4.1 Requesting a GPU</h3>
+
+<p>GPUs are a "generic resource" (GRES) in Slurm. Asking for one takes an explicit flag — <strong>a job without it gets zero GPUs even on a GPU partition</strong>, and your code will silently fall back to CPU and run perhaps fifty times slower.</p>
+
+<pre><code>#SBATCH --partition=gpu-common
+#SBATCH --gres=gpu:2080:1     <span class="c"># 1 GPU, specifically an RTX 2080</span>
+</code></pre>
+
+<p>The middle field is the GPU <em>type</em> and it is optional but consequential:</p>
+
+<dl>
+  <dt>--gres=gpu:1</dt>
+  <dd>Any available GPU. Shortest queue wait, but you might land on anything from an old 2080 to an A100. Fine when your job fits comfortably in the smallest card.</dd>
+  <dt>--gres=gpu:2080:1</dt>
+  <dd>Specifically an RTX 2080 (11 GB). What this project requests. Deliberate: these networks are small, a 2080 is plenty, and asking for the modest card means a much shorter queue than competing for A100s. <strong>Requesting a bigger GPU than you need makes your job wait longer for no speedup.</strong></dd>
+  <dt>--gres=gpu:a100:1</dt>
+  <dd>Specifically an A100 (40–80 GB). Justified only by genuine memory pressure or a model large enough to exploit it.</dd>
+</dl>
+
+<p>To see which type names are actually valid right now:</p>
+
+<pre><code><span class="k">sinfo</span> -p gpu-common -o "%N %G" | <span class="k">sort</span> -u
+</code></pre>
+
+<h3>4.2 Accounts</h3>
+
+<p>Some clusters require <code>#SBATCH --account=&lt;something&gt;</code> to charge the job against an allocation. At Duke this is generally handled by your group membership, and none of this project's scripts set it — they work as-is. If you ever see <em>"Invalid account or account/partition combination specified,"</em> that is the flag you are missing. Find your valid accounts with:</p>
+
+<pre><code><span class="k">sacctmgr</span> show associations user=$USER format=Account,Partition,QOS
+</code></pre>
+
+<h2>5. Software: modules and conda</h2>
+
+<h3>5.1 Environment modules</h3>
+
+<p>Cluster-provided software is exposed through <code>module</code>, which manipulates <code>PATH</code> and friends so that several conflicting versions of a tool can coexist on one machine.</p>
+
+<pre><code><span class="k">module</span> avail                 <span class="c"># everything installed (long)</span>
+<span class="k">module</span> avail cuda            <span class="c"># filter by name</span>
+<span class="k">module</span> load CUDA/12.1        <span class="c"># put it on PATH for this shell</span>
+<span class="k">module</span> list                  <span class="c"># what's loaded right now</span>
+<span class="k">module</span> unload CUDA/12.1
+<span class="k">module</span> purge                 <span class="c"># clean slate — good first line in a job script</span>
+</code></pre>
+
+<p>This project's scripts do <em>not</em> load a CUDA module, because the PyTorch installed by pip ships its own bundled CUDA runtime (the <code>+cu121</code> wheel in <code>environment_server.yml</code>). Only the NVIDIA <em>driver</em> needs to come from the node, and that is always present. Loading a conflicting CUDA module on top is a common way to break a working torch install.</p>
+
+<h3>5.2 Conda: one-time setup</h3>
+
+<p>Do this once, on a login node — installing packages is I/O-bound, not compute-bound, so it is an acceptable login-node activity.</p>
+
+<pre><code><span class="c"># 1. Install miniconda into GROUP space, not home (see §3.1)</span>
+<span class="k">cd</span> /hpc/group/fisherlab/ds555
+<span class="k">wget</span> https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
+<span class="k">bash</span> Miniconda3-latest-Linux-x86_64.sh -b -p /hpc/group/fisherlab/ds555/miniconda3
+
+<span class="c"># 2. Make conda usable in THIS shell (note: source, not conda init)</span>
+<span class="k">source</span> /hpc/group/fisherlab/ds555/miniconda3/etc/profile.d/conda.sh
+
+<span class="c"># 3. Build the project environment from the LINUX spec file</span>
+<span class="k">cd</span> /hpc/group/fisherlab/ds555/pinn_code
+<span class="k">conda</span> env create -f environment_server.yml
+<span class="k">conda</span> activate pinn_env
+</code></pre>
+
+<div class="box warn">
+  <span class="lbl">Use environment_server.yml, never environment.yml</span>
+  <p><code>environment.yml</code> is the macOS spec — it pins <code>pyobjc</code>, <code>appnope</code> and other Apple-only packages that cannot resolve on Linux. <code>environment_server.yml</code> is the cluster one, and it installs the CUDA-enabled PyTorch wheel. Match the wheel's CUDA version to the node driver: check with <code>nvidia-smi</code> inside a GPU allocation and adjust the <code>--index-url</code> (<code>cu118</code> / <code>cu121</code> / <code>cu124</code>) if needed.</p>
+</div>
+
+<h3>5.3 Why job scripts say <code>source ... conda.sh</code></h3>
+
+<p>Every script in <code>slurm/</code> begins with the same two lines:</p>
+
+<pre><code><span class="k">source</span> /hpc/group/fisherlab/ds555/miniconda3/etc/profile.d/conda.sh
+<span class="k">conda</span> activate pinn_env
+</code></pre>
+
+<p>The reason is that a batch job starts a <strong>non-interactive shell</strong>. Non-interactive shells do not read <code>~/.bashrc</code>, which is where <code>conda init</code> writes its setup block. So the <code>conda</code> shell function simply does not exist inside a job — and <code>conda activate</code> fails with <em>"Your shell has not been properly configured."</em> Sourcing <code>conda.sh</code> explicitly defines the function and makes the script self-contained regardless of the submitting user's dotfiles. Do this in every job script; it is not optional boilerplate.</p>
+
+<h3>5.4 Verifying the GPU actually arrived</h3>
+
+<p>Put this near the top of any new GPU job. It costs two seconds and saves you from discovering at hour three that you trained on CPU:</p>
+
+<pre><code><span class="k">python</span> -c "import torch; print('CUDA:', torch.cuda.is_available()); print('Device:', torch.cuda.get_device_name(0))"
+</code></pre>
+
+<p><code>slurm/run_smoke_test.sh</code> and <code>slurm/run_w1_smoke.sh</code> both do exactly this — that is what makes them smoke tests rather than just short runs.</p>
+
+<div class="pagebreak"></div>
+
+<h2>6. Anatomy of an sbatch script</h2>
+
+<p>A batch script is an ordinary shell script with a header of <code>#SBATCH</code> comment lines. The shell ignores them; Slurm reads them at submission to size the job. Here is a complete, annotated example — deliberately close to this project's real ones.</p>
+
+<pre><code>#!/bin/bash
+<span class="c">#────────────────────── resource request ──────────────────────</span>
+#SBATCH --job-name=pinn_demo          <span class="c"># label shown by squeue</span>
+#SBATCH --partition=gpu-common        <span class="c"># which node pool</span>
+#SBATCH --gres=gpu:2080:1             <span class="c"># 1 RTX 2080</span>
+#SBATCH --cpus-per-task=4             <span class="c"># CPU cores (dataloader workers, BLAS)</span>
+#SBATCH --mem=32G                     <span class="c"># HOST RAM — separate from GPU memory</span>
+#SBATCH --time=4:00:00                <span class="c"># HH:MM:SS wall clock; job is KILLED at the limit</span>
+#SBATCH --output=slurm/logs/demo_%j.out   <span class="c"># stdout; %j = job ID</span>
+#SBATCH --error=slurm/logs/demo_%j.err    <span class="c"># stderr</span>
+<span class="c"># Optional but useful:</span>
+<span class="c">#SBATCH --mail-type=END,FAIL</span>
+<span class="c">#SBATCH --mail-user=ds555@duke.edu</span>
+
+<span class="c">#────────────────────── environment ───────────────────────────</span>
+cd /hpc/group/fisherlab/ds555/pinn_code
+source /hpc/group/fisherlab/ds555/miniconda3/etc/profile.d/conda.sh
+conda activate pinn_env
+
+<span class="c">#────────────────────── provenance header ─────────────────────</span>
+<span class="c"># Print WHAT ran WHERE. Six months from now this log is your only</span>
+<span class="c"># record of which node and which GPU produced these numbers.</span>
+echo "Job ID:  $SLURM_JOB_ID"
+echo "Node:    $SLURMD_NODENAME"
+echo "GPU:     $(nvidia-smi --query-gpu=name --format=csv,noheader)"
+echo "Commit:  $(git rev-parse --short HEAD)"
+echo "Date:    $(date)"
+
+<span class="c">#────────────────────── the actual work ───────────────────────</span>
+python run_walk_forward.py \
+    --arch modified --mode hybrid --rwf_mu 0.75 \
+    --epochs 15000 --folds Nov2020 \
+    --output_dir runs/v2/demo
+
+echo "Done: $(date)"
+</code></pre>
+
+<h3>6.1 The directives that matter, and how to get them wrong</h3>
+
+<table>
+  <thead><tr><th style="width:20%">Directive</th><th style="width:36%">What it means</th><th>Failure mode if wrong</th></tr></thead>
+  <tbody>
+    <tr><td><code>--time</code></td><td>Wall-clock ceiling. The job is hard-killed the instant it is exceeded.</td><td><strong>Too low:</strong> job dies at 99% with no result and a truncated log. <strong>Too high:</strong> the scheduler can't slot you into short gaps, so you queue much longer. Aim for ~1.5× your measured runtime.</td></tr>
+    <tr><td><code>--mem</code></td><td><em>Host</em> RAM. Nothing to do with GPU VRAM.</td><td>Exceeding it triggers an OOM kill — often reported cryptically as exit code 137 or "Killed", with no Python traceback.</td></tr>
+    <tr><td><code>--gres</code></td><td>GPU count and optionally type.</td><td>Omitted → <code>torch.cuda.is_available()</code> is <code>False</code>, training silently proceeds on CPU at a crawl.</td></tr>
+    <tr><td><code>--cpus-per-task</code></td><td>Cores for the one task.</td><td>Too few starves dataloader workers; too many just extends your queue wait. For this project 4 is right — the work is GPU-bound.</td></tr>
+    <tr><td><code>--output</code>/<code>--error</code></td><td>Log destinations. <code>%j</code> = job ID, <code>%A</code> = array parent ID, <code>%a</code> = array task index.</td><td><strong>The directory must already exist.</strong> Slurm will not create <code>slurm/logs/</code> for you — the job fails instantly and, cruelly, leaves no log explaining why.</td></tr>
+  </tbody>
+</table>
+
+<div class="box warn">
+  <span class="lbl">The mkdir trap</span>
+  <p><code>mkdir -p slurm/logs</code> must happen <em>before</em> submission, not inside the script — by the time the script body runs, Slurm has already tried and failed to open the log file. This is exactly why <code>slurm/submit_all.sh</code> and <code>slurm/submit_w1.sh</code> both call <code>mkdir -p slurm/logs</code> before their first <code>sbatch</code>.</p>
+</div>
+
+<h3>6.2 Useful environment variables inside a job</h3>
+
+<table>
+  <thead><tr><th style="width:28%">Variable</th><th>Value</th></tr></thead>
+  <tbody>
+    <tr><td><code>$SLURM_JOB_ID</code></td><td>Unique job ID. Log it.</td></tr>
+    <tr><td><code>$SLURM_ARRAY_TASK_ID</code></td><td>This task's index within an array — the mechanism behind every config lookup in this project.</td></tr>
+    <tr><td><code>$SLURM_ARRAY_JOB_ID</code></td><td>The array's parent ID, shared by all its tasks.</td></tr>
+    <tr><td><code>$SLURMD_NODENAME</code></td><td>Which physical node you got.</td></tr>
+    <tr><td><code>$SLURM_CPUS_PER_TASK</code></td><td>Cores actually granted — pass it to your dataloader instead of hardcoding.</td></tr>
+    <tr><td><code>$SLURM_SUBMIT_DIR</code></td><td>The directory you ran <code>sbatch</code> from.</td></tr>
+  </tbody>
+</table>
+
+<h2>7. The five commands you actually use</h2>
+
+<h3>sbatch — submit</h3>
+
+<pre><code><span class="k">sbatch</span> slurm/run_smoke_test.sh              <span class="c"># → "Submitted batch job 1234567"</span>
+<span class="k">sbatch</span> --parsable slurm/run_smoke_test.sh   <span class="c"># → "1234567"  (bare ID, for scripting)</span>
+<span class="k">sbatch</span> --time=8:00:00 job.sh                <span class="c"># CLI flags OVERRIDE #SBATCH lines</span>
+<span class="k">sbatch</span> --array=0-12 slurm/run_benchmark.sh  <span class="c"># submit as a 13-task array</span>
+</code></pre>
+
+<p>The override rule is worth internalizing: anything on the command line beats the corresponding <code>#SBATCH</code> line in the file. That is how you extend a time limit for one run without editing (and having to un-edit) a script that is under version control.</p>
+
+<h3>squeue — what is running or waiting</h3>
+
+<pre><code><span class="k">squeue</span> -u $USER                             <span class="c"># your jobs</span>
+<span class="k">squeue</span> -u $USER -t PENDING                  <span class="c"># only the queued ones</span>
+<span class="k">squeue</span> -j 1234567                           <span class="c"># one specific job</span>
+<span class="k">squeue</span> -u $USER --start                     <span class="c"># estimated start times (a guess, not a promise)</span>
+<span class="k">watch</span> -n 30 "squeue -u $USER"               <span class="c"># auto-refresh every 30s (q to quit)</span>
+</code></pre>
+
+<p>The <code>ST</code> column is the state, and the <code>NODELIST(REASON)</code> column tells you why a pending job is pending:</p>
+
+<table>
+  <thead><tr><th style="width:16%">Code / reason</th><th>Meaning</th></tr></thead>
+  <tbody>
+    <tr><td><code>R</code></td><td>Running.</td></tr>
+    <tr><td><code>PD</code></td><td>Pending — see the reason in the last column.</td></tr>
+    <tr><td><code>CG</code></td><td>Completing — finished, cleaning up.</td></tr>
+    <tr><td><code>Resources</code></td><td>Normal. Nothing matching your request is free yet. Wait.</td></tr>
+    <tr><td><code>Priority</code></td><td>Normal. Higher-priority jobs are ahead of you.</td></tr>
+    <tr><td><code>Dependency</code></td><td>Waiting on a job you told it to wait for (see §10). Normal in this project's smoke→array pattern.</td></tr>
+    <tr><td><code>DependencyNeverSatisfied</code></td><td><strong>Not normal.</strong> The prerequisite job failed, so this one will wait forever. Cancel it and fix the prerequisite.</td></tr>
+    <tr><td><code>QOSMaxJobsPerUserLimit</code></td><td>You have hit a concurrency cap. Later tasks start as earlier ones finish; nothing to fix.</td></tr>
+    <tr><td><code>ReqNodeNotAvail</code></td><td>You asked for something that does not exist here — often a GPU type name that is wrong, or a <code>--time</code> above the partition maximum.</td></tr>
+  </tbody>
+</table>
+
+<h3>scancel — stop</h3>
+
+<pre><code><span class="k">scancel</span> 1234567          <span class="c"># one job (or a whole array, by parent ID)</span>
+<span class="k">scancel</span> 1234567_3        <span class="c"># one task of an array</span>
+<span class="k">scancel</span> -u $USER         <span class="c"># EVERYTHING you have queued or running — be sure</span>
+<span class="k">scancel</span> -u $USER -t PENDING   <span class="c"># drop the queue, let running jobs finish</span>
+<span class="k">scancel</span> --name=pinn_w1_balancer   <span class="c"># by job name</span>
+</code></pre>
+
+<h3>sacct — history and post-mortems</h3>
+
+<p><code>squeue</code> only shows live jobs. Once a job ends it vanishes from <code>squeue</code> entirely, and <code>sacct</code> is how you find out what happened.</p>
+
+<pre><code><span class="k">sacct</span> -j 1234567 --format=JobID,JobName%22,State,ExitCode,Elapsed,MaxRSS,ReqTRES%40
+<span class="k">sacct</span> -u $USER --starttime=2026-08-01 --format=JobID,JobName%20,State,Elapsed
+<span class="k">sacct</span> -u $USER --state=FAILED,TIMEOUT --starttime=now-7days   <span class="c"># the week's failures</span>
+</code></pre>
+
+<p>Read the <code>State</code> column first:</p>
+
+<table>
+  <thead><tr><th style="width:20%">State</th><th>What it tells you</th></tr></thead>
+  <tbody>
+    <tr><td><code>COMPLETED</code></td><td>Exit code 0. Note this only means the <em>script</em> succeeded — a Python script that caught an exception and returned 0 still shows COMPLETED. Check your logs.</td></tr>
+    <tr><td><code>FAILED</code></td><td>Non-zero exit. Read the <code>.err</code> file.</td></tr>
+    <tr><td><code>TIMEOUT</code></td><td>Hit <code>--time</code>. Raise the limit, or checkpoint and resume.</td></tr>
+    <tr><td><code>OUT_OF_MEMORY</code></td><td>Exceeded <code>--mem</code>. Raise it, or shrink batch/grid size.</td></tr>
+    <tr><td><code>CANCELLED</code></td><td>You (or an admin, or preemption on <code>scavenger</code>) killed it.</td></tr>
+    <tr><td><code>NODE_FAIL</code></td><td>Hardware problem, not your fault. Resubmit.</td></tr>
+  </tbody>
+</table>
+
+<h3>seff — the efficiency report</h3>
+
+<p>Run this on every finished job for a while. It is the fastest way to learn what your jobs actually need.</p>
+
+<pre><code><span class="k">seff</span> 1234567
+</code></pre>
+
+<pre><code>Job ID: 1234567
+State: COMPLETED (exit code 0)
+Cores: 4
+CPU Utilized: 00:41:12
+CPU Efficiency: 8.4% of 08:12:00 core-walltime
+Job Wall-clock time: 02:03:00
+Memory Utilized: 3.21 GB
+Memory Efficiency: 10.03% of 32.00 GB
+</code></pre>
+
+<p>Read that output as a diagnosis, not a grade:</p>
+<ul>
+  <li><strong>Memory Efficiency 10%</strong> — you asked for 32 G and used 3.2 G. Drop to <code>--mem=8G</code>. Smaller requests are scheduled sooner, so this directly shortens your queue wait.</li>
+  <li><strong>CPU Efficiency 8%</strong> — expected and fine for GPU training. The CPU is idle because the GPU is doing the work. <code>seff</code> does not measure GPU utilization, so low CPU efficiency here is not a problem to fix.</li>
+  <li><strong>Wall-clock 2:03 against a 4-hour limit</strong> — reasonable headroom. Below ~1.2× you risk TIMEOUT; above ~3× you are queueing longer than necessary.</li>
+</ul>
+
+<div class="pagebreak"></div>
+
+<h2>8. Interactive sessions</h2>
+
+<p>Batch jobs are right for anything you will run more than once. But for debugging — when you want to run a script, watch it crash, edit, and rerun — you want a shell on a compute node.</p>
+
+<pre><code><span class="c"># Ask for a GPU node and drop into a shell on it</span>
+<span class="k">srun</span> --partition=gpu-common --gres=gpu:2080:1 \
+     --mem=16G --cpus-per-task=4 --time=1:00:00 --pty bash
+
+<span class="c"># You are now ON a compute node. Set up and work normally:</span>
+<span class="k">cd</span> /hpc/group/fisherlab/ds555/pinn_code
+<span class="k">source</span> /hpc/group/fisherlab/ds555/miniconda3/etc/profile.d/conda.sh
+<span class="k">conda</span> activate pinn_env
+<span class="k">python</span> run_walk_forward.py --folds Nov2020 --epochs 200 --output_dir runs/v2/scratch
+
+<span class="k">exit</span>   <span class="c"># releases the allocation — do NOT just close your laptop</span>
+</code></pre>
+
+<p>Three cautions:</p>
+
+<ul>
+  <li><strong>The allocation dies with your SSH connection.</strong> Wifi drops, laptop sleeps, session gone. Run <code>tmux</code> on the login node <em>before</em> <code>srun</code>, and you can detach (<code>Ctrl-b d</code>) and reattach later with <code>tmux attach</code>.</li>
+  <li><strong>You are holding a GPU the entire time</strong>, including while you stare at code. Ask for one hour, not eight, and <code>exit</code> when you are done thinking.</li>
+  <li><strong>Interactive work is not reproducible.</strong> The moment something works, move it into a script under <code>slurm/</code> and commit it. <code>slurm/run_w0_audits.sh</code> documents its own <code>srun</code> equivalent in a comment block for exactly this reason — the batch script is the record; the interactive form is the scratchpad.</li>
+</ul>
+
+<h2>9. Job arrays</h2>
+
+<p>An array runs the same script N times with a different index each time. It is the correct tool whenever you have a grid of configurations — which, in this project, is essentially always.</p>
+
+<pre><code><span class="k">sbatch</span> --array=0-12 slurm/run_benchmark.sh   <span class="c"># 13 tasks: 0,1,...,12</span>
+<span class="k">sbatch</span> --array=0,3,7 job.sh                  <span class="c"># only those three</span>
+<span class="k">sbatch</span> --array=0-12%4 job.sh                 <span class="c"># at most 4 concurrent (be a good neighbour)</span>
+<span class="k">sbatch</span> --array=0-5 --dependency=afterok:999 job.sh
+</code></pre>
+
+<p>Inside the script, <code>$SLURM_ARRAY_TASK_ID</code> holds this task's index. The pattern used throughout this project is a parallel-arrays lookup — index into bash arrays to recover the configuration:</p>
+
+<pre><code><span class="c"># One entry per task, positions aligned across all arrays</span>
+ARCHS=(standard standard modified modified)
+MODES=(physics  hybrid   physics  hybrid)
+MUS=(   1.0     1.0      0.75     0.75)
+
+ARCH=${ARCHS[$SLURM_ARRAY_TASK_ID]}
+MODE=${MODES[$SLURM_ARRAY_TASK_ID]}
+MU=${MUS[$SLURM_ARRAY_TASK_ID]}
+
+python run_walk_forward.py --arch $ARCH --mode $MODE --rwf_mu $MU
+</code></pre>
+
+<p>This is readable, has no dependencies, and keeps the whole grid visible in one place. Its one hazard is silent misalignment: if you append to <code>ARCHS</code> and forget <code>MUS</code>, the missing element expands to an empty string, and your job runs with <code>--rwf_mu</code> followed by nothing — either a confusing argparse error or, worse, a run with the wrong meaning. Whenever you extend a grid, count every array.</p>
+
+<p>Log files should use <code>%A_%a</code> so each task gets its own:</p>
+
+<pre><code>#SBATCH --output=slurm/logs/slurm_%A_%a.out   <span class="c"># → slurm_1234567_0.out, _1.out, ...</span>
+</code></pre>
+
+<h3>9.1 Rerunning just the tasks that failed</h3>
+
+<pre><code><span class="c"># Which tasks of array 1234567 failed?</span>
+<span class="k">sacct</span> -j 1234567 --format=JobID,State | <span class="k">grep</span> -E "FAILED|TIMEOUT"
+
+<span class="c"># Resubmit only those indices — no need to rerun the successes</span>
+<span class="k">sbatch</span> --array=3,7 slurm/run_benchmark.sh
+</code></pre>
+
+<p>This is a major practical advantage of the index-lookup pattern: task index 7 always means the same configuration, so re-running index 7 reproduces exactly the cell that failed.</p>
+
+<h2>10. Job dependencies</h2>
+
+<p>Dependencies let you chain jobs so that stage 2 only starts if stage 1 succeeded. This project uses them to gate expensive arrays behind cheap smoke tests.</p>
+
+<pre><code><span class="c"># --parsable makes sbatch print ONLY the job ID, so it can be captured</span>
+SMOKE_ID=$(<span class="k">sbatch</span> --parsable slurm/run_smoke_test.sh)
+
+<span class="c"># The array is submitted immediately but stays PENDING until smoke succeeds</span>
+<span class="k">sbatch</span> --array=0-12 --dependency=afterok:$SMOKE_ID slurm/run_benchmark.sh
+</code></pre>
+
+<table>
+  <thead><tr><th style="width:26%">Dependency type</th><th>Starts when the prerequisite…</th></tr></thead>
+  <tbody>
+    <tr><td><code>afterok:ID</code></td><td>…finishes with exit code 0. <strong>The one you almost always want.</strong></td></tr>
+    <tr><td><code>afterany:ID</code></td><td>…finishes, success or not. For cleanup or "collect whatever we got" jobs.</td></tr>
+    <tr><td><code>afternotok:ID</code></td><td>…fails. For automatic notification or fallback.</td></tr>
+    <tr><td><code>after:ID</code></td><td>…merely starts. Rarely what you mean.</td></tr>
+    <tr><td><code>singleton</code></td><td>…all your prior jobs with the same <code>--job-name</code> are done. Serializes a named pipeline.</td></tr>
+  </tbody>
+</table>
+
+<p>The payoff: a 13-task array on a 4-hour limit is up to 52 GPU-hours. A five-minute smoke test in front of it catches the typo, the missing flag, and the broken import before any of that is committed. This is why <code>submit_all.sh</code>, <code>submit_stage2.sh</code>, and <code>submit_w1.sh</code> all follow the same smoke-gates-array shape.</p>
+
+<div class="box warn">
+  <span class="lbl">DependencyNeverSatisfied</span>
+  <p>If the smoke test fails, the dependent array does not fail — it sits <code>PD</code> forever with reason <code>DependencyNeverSatisfied</code>, quietly occupying a slot in your queue. Slurm may eventually purge it, but do not count on that. Check with <code>squeue -u $USER</code> after any failed gate and <code>scancel</code> the orphan.</p>
+</div>
+
+<h2>11. Right-sizing your requests</h2>
+
+<p>There is a real tension here. Bigger requests are safer (no TIMEOUT, no OOM) but queue longer, because the scheduler must find a larger contiguous hole. Smaller requests start sooner but risk being killed. The resolution is to measure rather than guess.</p>
+
+<div class="flow">
+1. <strong>Smoke run</strong>   — one fold, few epochs, generous limits (--mem=32G --time=1:00:00)
+2. <strong>seff it</strong>     — read actual MaxRSS and Elapsed
+3. <strong>Extrapolate</strong> — 9 folds × 15000 epochs is ~90× a 1-fold 1500-epoch run
+4. <strong>Set limits</strong>  — memory ≈ 1.5× observed peak; time ≈ 1.5× extrapolated
+5. <strong>Submit the array</strong>
+</div>
+
+<p>Two asymmetries to keep in mind while doing this. Memory overshoot is cheap in wall-clock terms and catastrophic when wrong, so be generous — 32 G costs little on a node with 256 G. Time overshoot is genuinely expensive in queue position, so be closer to the bone there, and prefer checkpointing over enormous limits for very long jobs.</p>
+
+<h2>12. Moving data in and out</h2>
+
+<pre><code><span class="c"># Laptop → cluster (single file)</span>
+<span class="k">scp</span> data/TSLA_2020_Split_Adjusted.csv dcc:/hpc/group/fisherlab/ds555/pinn_code/data/
+
+<span class="c"># Cluster → laptop (results directory), resumable and incremental</span>
+<span class="k">rsync</span> -avz --progress dcc:/hpc/group/fisherlab/ds555/pinn_code/reports/ ./reports/
+
+<span class="c"># Sync code up while skipping everything that shouldn't travel</span>
+<span class="k">rsync</span> -avz --exclude '.git' --exclude '__pycache__' --exclude 'runs/' \
+      ./ dcc:/hpc/group/fisherlab/ds555/pinn_code/
+</code></pre>
+
+<p>Prefer <code>rsync</code> over <code>scp</code> for anything you will transfer more than once: it copies only what changed, resumes after an interruption, and <code>-z</code> compresses in flight. Note that with the <code>ControlMaster</code> config from §2.1, none of these re-prompt for MFA.</p>
+
+<p>That said, for <em>code</em> the better path is git — push from your laptop, pull on the cluster. It gives you the commit hash in your job log, which is what makes a run reproducible. Reserve <code>rsync</code> for data and results, which do not belong in git anyway.</p>
+
+<h2>13. Troubleshooting table</h2>
+
+<table>
+  <thead><tr><th style="width:30%">Symptom</th><th style="width:32%">Likely cause</th><th>Fix</th></tr></thead>
+  <tbody>
+    <tr><td>Job vanishes instantly, no log file at all</td><td>The log directory does not exist</td><td><code>mkdir -p slurm/logs</code> before submitting</td></tr>
+    <tr><td><code>conda: command not found</code></td><td>Non-interactive shell never read <code>.bashrc</code></td><td><code>source .../etc/profile.d/conda.sh</code> in the script (§5.3)</td></tr>
+    <tr><td><code>CUDA: False</code> in the log</td><td><code>--gres</code> missing, or wrong partition</td><td>Add <code>--gres=gpu:2080:1</code> and <code>--partition=gpu-common</code></td></tr>
+    <tr><td><code>CUDA out of memory</code></td><td><em>GPU</em> VRAM exhausted — <code>--mem</code> is irrelevant here</td><td>Smaller batch/collocation grid, or request a larger GPU type</td></tr>
+    <tr><td>Exit 137, "Killed", no traceback</td><td><em>Host</em> RAM OOM</td><td>Raise <code>--mem</code>; confirm with <code>sacct --format=MaxRSS</code></td></tr>
+    <tr><td>State <code>TIMEOUT</code></td><td><code>--time</code> too low</td><td>Raise it; <code>seff</code> the partial run to extrapolate</td></tr>
+    <tr><td>Pending forever, <code>ReqNodeNotAvail</code></td><td>Impossible request — bad GPU type name, or time above partition max</td><td><code>sinfo -p gpu-common -o "%N %G"</code>; <code>scontrol show partition gpu-common</code></td></tr>
+    <tr><td>Pending, <code>DependencyNeverSatisfied</code></td><td>The gating job failed</td><td>Read the gate's log, <code>scancel</code> the orphan, fix, resubmit</td></tr>
+    <tr><td><code>Permission denied</code> writing output</td><td>Writing outside your group space, or quota exhausted</td><td><code>df -h /hpc/group/fisherlab</code>; check the path in <code>--output_dir</code></td></tr>
+    <tr><td>Runs on login node but fails in batch</td><td>Relative paths — the job's CWD is not what you assume</td><td><code>cd</code> to an absolute project root as the script's first line</td></tr>
+    <tr><td>Array task N wrong config</td><td>Misaligned parallel bash arrays</td><td>Count every array; <code>echo</code> the resolved config before running (§9)</td></tr>
+    <tr><td>Job killed mid-run, State <code>PREEMPTED</code></td><td>Running on <code>scavenger</code>; owner reclaimed the node</td><td>Expected there. Move to <code>gpu-common</code>, or checkpoint and auto-resume</td></tr>
+  </tbody>
+</table>
+
+<h3>13.1 A general debugging order</h3>
+
+<ol>
+  <li><code>sacct -j &lt;id&gt; --format=JobID,State,ExitCode,Elapsed,MaxRSS</code> — did Slurm kill it, or did the code fail?</li>
+  <li>If Slurm killed it, the State names the resource. Raise that one.</li>
+  <li>If the code failed, read the <code>.err</code> file — the traceback is there.</li>
+  <li>If the <code>.err</code> is empty and the <code>.out</code> stops mid-stream, suspect OOM.</li>
+  <li>Reproduce interactively with <code>srun --pty bash</code> on the smallest input that still fails.</li>
+</ol>
+
+<h2>14. Etiquette and the checklist</h2>
+
+<p>Shared infrastructure runs on norms as much as on rules.</p>
+
+<ul>
+  <li><strong>Nothing heavy on login nodes.</strong> No training, no big compiles, no <code>python</code> sessions loading a dataset. Editing, git, and <code>tail</code> are fine.</li>
+  <li><strong>Ask for what you need.</strong> Habitually requesting 8 GPUs and 256 G "to be safe" blocks other people and lengthens your own queue.</li>
+  <li><strong>Throttle wide arrays</strong> with <code>%N</code> — <code>--array=0-99%10</code> is a courtesy that costs you almost nothing.</li>
+  <li><strong>Cancel what you don't need.</strong> Especially interactive allocations, which sit idle holding a GPU while you think.</li>
+  <li><strong>Clean up scratch.</strong> Delete failed-run directories; group quota is shared with your labmates.</li>
+  <li><strong>Prefer <code>scavenger</code> for preemptible work.</strong> If your job checkpoints and resumes, using idle capacity is free throughput for you and costs the owner nothing.</li>
+</ul>
+
+<div class="box ok">
+  <span class="lbl">Pre-submission checklist</span>
+  <ol style="margin-bottom:0">
+    <li><code>mkdir -p slurm/logs</code> — the directory exists</li>
+    <li>Script <code>cd</code>s to an absolute project root</li>
+    <li>Conda is sourced explicitly, then activated</li>
+    <li><code>--gres</code> present if the job needs a GPU</li>
+    <li><code>--time</code> and <code>--mem</code> informed by a prior <code>seff</code>, not by guesswork</li>
+    <li>Output paths point where you intend (for this project: check <code>RUN_ROOT</code> — see Guide 2)</li>
+    <li>A short smoke test has passed, ideally as an <code>afterok</code> gate</li>
+    <li>Job name is descriptive enough to recognize in <code>squeue</code> next week</li>
+  </ol>
+</div>
+
+<hr class="soft">
+
+<p class="small"><strong>Where to go next.</strong> Guide 2 applies all of this to the PINN project's own <code>slurm/</code> tree: what each script does, the <code>RUN_ROOT</code> versioning that keeps v1 and v2 results separate, and complete end-to-end runthroughs. For anything site-specific that this guide could not pin down, the Duke OIT DCC documentation and <code>oit-rc-help@duke.edu</code> are authoritative.</p>

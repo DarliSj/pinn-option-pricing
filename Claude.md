@@ -63,10 +63,23 @@ The most important ones:
      violate it (38% butterfly at μ=1.0) — MSE residual ≠ pointwise convexity.
   4. Constant-σ physics ⟂ smile data (model error — Stage 2's job to fix).
   5. Pooled RMSE and violation *rates* hide fold outliers and severity blow-ups.
-- Active workstream (docs/TODO.md): W0 instrument → W1 balancer fix (ReLoBRaLo
-  cheap test vs augmented-Lagrangian target) → W2 architecture μ-gate → W3
-  protocol lock (retire argmin; drop val if convergence verified) → W4 arbitrage
-  objective → W5/W6 re-sweeps → W7 re-baseline.
+- **W0/W1 are COMPLETE (Aug 2026) and redirected the plan:**
+  - Balancer defect confirmed (λ_data → 9.4×10⁴) and fixed (**ReLoBRaLo**, →~2);
+    Σλ-renorm rejected (collapses λ_pde to ~2e-4). But hybrid *still* loses to
+    physics (6.76 vs 5.90) → **the balancer was not the root cause.**
+  - ⚠ Butterfly *rates* are largely a finite-difference artifact (analytic BS
+    floor = 4.015); only μ=1.0's calendar violations are real.
+  - ⚠ Stage 2's σ_θ does NOT track market IV (corr ∈ [−0.26,+0.29]; B10/A-Vol
+    learned a constant σ=0.594) → paper §5 needs revision.
+- **Active workstream: R1 (regime conditioning).** Root cause is a *missing
+  input*: BS needs σ, but the net only got (m, τ) with σ frozen per fold, so
+  `L_data` fit a one-to-many map (across-date v̂ spread ≈ $4.71). Fix:
+  `v̂(m, τ, ν)`, ν = 1-day-lagged ATM-median IV. **Loss functions unchanged** —
+  input space changed. Physics stays ν-independent (anchors every ν-slice);
+  only `L_data` differentiates slices. **ν is an INPUT, never σ** (as σ: 8.61 vs
+  6.95). Flag: `--regime_input atm_iv_lag`, default off = v1-identical.
+  Then R2 (σ_θ(m,τ,ν) for Stage 2) → W2 μ-gate → W3 protocol → W4 arbitrage →
+  W5/W6 re-sweeps → W7 re-baseline.
 - Locked decisions: balancer first; mean-fold RMSE + MAE primary (pooled
   secondary); μ re-selected on arbitrage + RMSE jointly; prediction-averaging
   only (never weight-SWA); ICNN hard constraints = fallback only.

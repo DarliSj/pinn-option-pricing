@@ -69,13 +69,18 @@ class PricingNet(nn.Module):
                     → Modified hidden layers × N → Linear output
     """
     def __init__(self, hidden_dims=None, fourier_features=64, fourier_scale=1.0,
-                 rwf_mu=1.0, rwf_sigma=0.1):
+                 rwf_mu=1.0, rwf_sigma=0.1, n_inputs=2):
         super().__init__()
         if hidden_dims is None:
             hidden_dims = [64, 64, 64, 64]
 
+        # n_inputs=3 → regime-conditioned pricing net v̂(m, τ, ν) (R1).
+        # ν (lagged ATM IV, [~0.45, 1.4]) is on the same scale as m, so it
+        # feeds the Fourier embedding directly. The B-matrix shape differs
+        # from the 2-input net, so cross-loading checkpoints fails loudly.
+        self.n_inputs = n_inputs
         self.embedding = FourierFeatureEmbedding(
-            in_dim=2, n_features=fourier_features, scale=fourier_scale
+            in_dim=n_inputs, n_features=fourier_features, scale=fourier_scale
         )
         embed_dim = self.embedding.out_dim
         hidden = hidden_dims[0]
@@ -95,13 +100,18 @@ class PricingNet(nn.Module):
         self.output_layer = RWFLinear(hidden, 1, mu=rwf_mu, sigma=rwf_sigma)
         self.activation = nn.Tanh()
 
-    def forward(self, m, tau):
+    def forward(self, m, tau, nu=None):
         if m.dim() == 1:
             m = m.unsqueeze(1)
         if tau.dim() == 1:
             tau = tau.unsqueeze(1)
 
-        x = torch.cat([m, tau], dim=1)
+        cols = [m, tau]
+        if nu is not None:
+            if nu.dim() == 1:
+                nu = nu.unsqueeze(1)
+            cols.append(nu)
+        x = torch.cat(cols, dim=1)
         x = self.embedding(x)
 
         # Compute encoders once (Eq. 6.7)
@@ -129,13 +139,15 @@ class StandardPricingNet(nn.Module):
     BC/TC gradient vanishing through the serial tanh chain. Used as a
     baseline to demonstrate the value of the architectural changes.
     """
-    def __init__(self, hidden_dims=None, fourier_features=64, fourier_scale=1.0):
+    def __init__(self, hidden_dims=None, fourier_features=64, fourier_scale=1.0,
+                 n_inputs=2):
         super().__init__()
         if hidden_dims is None:
             hidden_dims = [64, 64, 64, 64]
 
+        self.n_inputs = n_inputs
         self.embedding = FourierFeatureEmbedding(
-            in_dim=2, n_features=fourier_features, scale=fourier_scale
+            in_dim=n_inputs, n_features=fourier_features, scale=fourier_scale
         )
 
         layers = []
@@ -154,12 +166,17 @@ class StandardPricingNet(nn.Module):
                 nn.init.xavier_normal_(m.weight)
                 nn.init.zeros_(m.bias)
 
-    def forward(self, m, tau):
+    def forward(self, m, tau, nu=None):
         if m.dim() == 1:
             m = m.unsqueeze(1)
         if tau.dim() == 1:
             tau = tau.unsqueeze(1)
-        x = torch.cat([m, tau], dim=1)
+        cols = [m, tau]
+        if nu is not None:
+            if nu.dim() == 1:
+                nu = nu.unsqueeze(1)
+            cols.append(nu)
+        x = torch.cat(cols, dim=1)
         x = self.embedding(x)
         return self.net(x)
 

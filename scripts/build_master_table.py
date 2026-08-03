@@ -535,9 +535,12 @@ def main():
     print("\n" + "=" * 80)
     print("MASTER BENCHMARK TABLE")
     print("=" * 80)
-    cols_to_show = ["config", "pooled_rmse", "mean_fold_rmse", "std_fold_rmse",
-                    "pooled_rmse_wing", "pooled_rmse_spread",
-                    "arb_butterfly%", "e_star_mean"]
+    # Mean-fold metrics lead (primary per HYBRID_PARETO_PLAN §0); pooled
+    # is secondary. Severity sits beside the rate it contextualizes.
+    cols_to_show = ["config", "mean_fold_rmse", "mean_fold_mae", "std_fold_rmse",
+                    "arb_butterfly%", "arb_calendar%",
+                    "arb_bfly_sev", "arb_cal_sev",
+                    "pooled_rmse", "e_star_mean"]
     cols_to_show = [c for c in cols_to_show if c in df.columns]
     with pd.option_context("display.max_rows", None, "display.max_colwidth", 30,
                            "display.float_format", "{:.3f}".format):

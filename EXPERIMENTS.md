@@ -59,10 +59,39 @@ python run_walk_forward.py --mode hybrid --arch modified --rwf_mu 0.75 \
     --data_loss_warmup 5000 --output_dir runs/v2/walk_forward
 ```
 
+## Where each step runs (DCC vs local)
+
+Training needs a GPU and stays on DCC; **everything analytical can run locally**
+against results pulled via git (`runs/` is tracked — checkpoints are ~156 KB
+each, ~62 MB total).
+
+| Step | Where | Environment |
+|---|---|---|
+| Stage 1 / Stage 2 / W1 training runs | DCC (SLURM, GPU) | `conda activate pinn_env` |
+| Aggregation, v1-vs-v2 comparison | either | local `.venv` or `pinn_env` |
+| W0 audits (fidelity, σ_θ-vs-IV) | either (CPU is fine) | local `.venv` or `pinn_env` |
+| Paper render | local | local `.venv` |
+
+**Every command below needs an environment active** — a bare `python` has no
+numpy and will fail with `ModuleNotFoundError`:
+
+```bash
+# On DCC:
+source /hpc/group/fisherlab/ds555/miniconda3/etc/profile.d/conda.sh
+conda activate pinn_env
+
+# Locally (one-time setup — see requirements-local.txt):
+python3 -m venv .venv
+./.venv/bin/python -m pip install -r requirements-local.txt
+./.venv/bin/python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+# then use ./.venv/bin/python, or `source .venv/bin/activate`
+```
+
 ## Aggregate & compare
 
 ```bash
-# (v1 is already frozen in reports/v1/; regenerating reproduces it)
+# (v1 is already frozen in reports/v1/; regenerating reproduces it —
+#  verified: max abs diff 0.0 across all shared numeric columns)
 python scripts/build_master_table.py --label v1 --output_dir reports/v1
 
 # Build the v2 table from the v2 tree, reusing the shared baselines

@@ -85,6 +85,14 @@ def main():
                         help="ReLoBRaLo Bernoulli lookback probability ρ, "
                              "drawn once per balancer update (only used "
                              "with --balancer relobralo).")
+    parser.add_argument("--regime_input", default="none",
+                        choices=["none", "atm_iv_lag"],
+                        help="R1 regime conditioning. 'atm_iv_lag' adds a "
+                             "third network input ν = per-quote 1-day-lagged "
+                             "ATM IV (strictly no-look-ahead). Physics stays "
+                             "at σ_fixed; ν makes the DATA term identifiable "
+                             "across vol regimes. Default 'none' = v1 "
+                             "2-input net, byte-identical.")
     parser.add_argument("--track_test_curve", action="store_true",
                         help="DIAGNOSTIC ONLY: also evaluate the test month "
                              "at every val cadence and record the curve in "
@@ -114,6 +122,8 @@ def main():
         run_tag += f"_warmup{args.data_loss_warmup}"
     if args.balancer != "gradnorm":
         run_tag += f"_{args.balancer}"
+    if args.regime_input != "none":
+        run_tag += "_nuatm"
     output_dir = Path(args.output_dir) / run_tag
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -184,11 +194,17 @@ def main():
             relobralo_temperature=args.relobralo_temperature,
             relobralo_rho=args.relobralo_rho,
             track_test_curve=args.track_test_curve,
+            regime_input=(None if args.regime_input == "none"
+                          else args.regime_input),
         )
 
         # Model is now restored to val-best (or final-epoch if val=None).
-        # No-arbitrage diagnostic on the reported model.
-        arb = compute_arbitrage_ratios(model, config, device)
+        # No-arbitrage diagnostic on the reported model. With regime
+        # conditioning, check the ν-slice this fold actually prices with
+        # (the test month's median ν).
+        nu_slice = (float(np.median(test_arrays["nu"]))
+                    if args.regime_input != "none" else None)
+        arb = compute_arbitrage_ratios(model, config, device, nu=nu_slice)
 
         fold_result = {
             "fold": fold["name"],
@@ -349,6 +365,7 @@ def main():
         "n_folds":             len(results),
         "val_months":          args.val_months,
         "balancer":            args.balancer,
+        "regime_input":        args.regime_input,
     }
     with open(output_dir / "results.json", "w") as f:
         json.dump({"folds": results, "summary": summary}, f, indent=2)

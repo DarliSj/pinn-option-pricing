@@ -330,7 +330,7 @@ def plot_vol_slices(vol_model, config, device, sigma_fixed,
 
 def compute_arbitrage_ratios(model, config, device, vol_model=None,
                              n_m=80, n_tau=40, eps_m=1e-3, eps_tau=1e-3,
-                             tol=1e-6):
+                             tol=1e-6, nu=None):
     """
     No-arbitrage diagnostic for the learned price surface v̂(m, τ).
 
@@ -384,10 +384,21 @@ def compute_arbitrage_ratios(model, config, device, vol_model=None,
 
     def _eval(m_arr, tau_arr):
         with torch.no_grad():
-            v = model(
-                torch.tensor(m_arr).to(device),
-                torch.tensor(tau_arr).to(device),
-            ).squeeze().cpu().numpy()
+            if nu is not None:
+                # R1: check the ν-slice actually used for this fold's
+                # pricing (caller passes e.g. the test month's median ν).
+                nu_t = torch.full((len(m_arr),), float(nu),
+                                  dtype=torch.float32, device=device)
+                v = model(
+                    torch.tensor(m_arr).to(device),
+                    torch.tensor(tau_arr).to(device),
+                    nu_t,
+                ).squeeze().cpu().numpy()
+            else:
+                v = model(
+                    torch.tensor(m_arr).to(device),
+                    torch.tensor(tau_arr).to(device),
+                ).squeeze().cpu().numpy()
         return v.reshape(M_g.shape)
 
     v_center = _eval(m_flat, tau_flat)

@@ -6,6 +6,25 @@
 **North star:** produce a single model that **beats BS on RMSE (mean-fold
 primary, pooled secondary) _and_ is arbitrage-consistent** — i.e. close the hole
 in the RMSE-vs-arbitrage frontier.
+
+> **⚠ UPDATE 2026-08 — W0/W1 results redirected this plan.** Two corrections and
+> one new root cause:
+> 1. **The balancer was not the root cause.** ReLoBRaLo bounds λ_data from
+>    9.4×10⁴ to ~2, yet hybrid still loses to physics (6.76 vs 5.90). Balancer
+>    work is *done* (ReLoBRaLo wins; Σλ-renorm rejected — it collapses λ_pde to
+>    ~2e-4). Augmented-Lagrangian demoted to the *arbitrage-constraint*
+>    mechanism only, not a balancer fix.
+> 2. **Butterfly rates are largely an artifact** — the analytic BS surface shows
+>    the same integrated severity (4.015, the payoff kink) under the same finite
+>    differences. PINN excess over floor is only 0.1–15%. §2-B's "Modified-MLP is
+>    an arbitrage source" is **retracted for butterfly**; what survives is that
+>    μ=1.0 is a bad *PDE solve* (10× worse fidelity, real calendar violations
+>    against a floor of exactly 0).
+> 3. **The real defect is a missing input (R1).** The net never sees the vol
+>    regime, so `L_data` fits a one-to-many map. Fix implemented: `v̂(m, τ, ν)`.
+>    Bucket evidence: BS 6.95 → **6.23** with regime conditioning, beating every
+>    model in the benchmark. See `TRAINING_VALIDATION_DISCUSSION.md` §P6 and
+>    `TODO.md` R1/R2. **R1/R2 now precede W4–W7.**
 **Budget:** full re-sweep approved (grid + Stage 2 cells with new loss terms).
 
 **Decisions locked (2026-06-02):**
