@@ -1,0 +1,35 @@
+============================================
+Job ID:  49232988
+Node:    dcc-core-ferc-s-z25-20
+GPU:     NVIDIA GeForce RTX 2080 Ti
+Date:    Fri Jul  3 02:33:09 PM EDT 2026
+============================================
+
+=== W0 audit 1/2: physics-fidelity (vs analytic BS + arb severity) ===
+standard_physics                 Nov2020: err_rmse=0.00026 bfly 2.8% (floor 0.5%)  sev 4.018 | cal 0.1% sev 3.659e-06
+standard_physics                 Sep2020: err_rmse=0.00018 bfly 2.7% (floor 0.5%)  sev 4.021 | cal 0.1% sev 2.121e-06
+modified_physics_mu0.5           Nov2020: err_rmse=0.00072 bfly 17.1% (floor 0.5%)  sev 4.07 | cal 0.1% sev 1.712e-05
+modified_physics_mu0.5           Sep2020: err_rmse=0.00038 bfly 14.4% (floor 0.5%)  sev 4.069 | cal 0.1% sev 5.76e-06
+modified_physics_mu0.75          Nov2020: err_rmse=0.00036 bfly 24.5% (floor 0.5%)  sev 4.141 | cal 0.3% sev 2.043e-05
+modified_physics_mu0.75          Sep2020: err_rmse=0.00031 bfly 23.3% (floor 0.5%)  sev 4.139 | cal 0.2% sev 1.688e-05
+modified_physics_mu1.0           Nov2020: err_rmse=0.00597 bfly 37.3% (floor 0.5%)  sev 4.617 | cal 23.7% sev 0.03065
+modified_physics_mu1.0           Sep2020: err_rmse=0.00383 bfly 36.2% (floor 0.5%)  sev 4.572 | cal 20.7% sev 0.02347
+
+Wrote reports/diagnostic/physics_fidelity.csv (8 new/updated rows, 8 total) and PNGs to reports/diagnostic/
+
+=== W0 audit 2/2: σ_θ vs market-IV overlay (Stage 2) ===
+stage2_B10_cvol        Nov2020: corr(σ_θ, IV)=-0.257  vol-RMSE 0.1427 vs flat 0.1423 → does NOT beat flat σ
+stage2_B10_cvol        Dec2020: corr(σ_θ, IV)=+0.055  vol-RMSE 0.1804 vs flat 0.1808 → BEATS flat σ
+stage2_B10_avol        Nov2020: corr(σ_θ, IV)=+0.142  vol-RMSE 0.1830 vs flat 0.1423 → does NOT beat flat σ
+stage2_B10_avol        Dec2020: corr(σ_θ, IV)=+0.285  vol-RMSE 0.2654 vs flat 0.1808 → does NOT beat flat σ
+stage2_B12_cvol        Nov2020: corr(σ_θ, IV)=+0.053  vol-RMSE 0.1425 vs flat 0.1423 → does NOT beat flat σ
+stage2_B12_cvol        Dec2020: corr(σ_θ, IV)=+0.246  vol-RMSE 0.1808 vs flat 0.1808 → BEATS flat σ
+stage2_B12_avol        Nov2020: corr(σ_θ, IV)=+0.064  vol-RMSE 0.1326 vs flat 0.1423 → BEATS flat σ
+stage2_B12_avol        Dec2020: corr(σ_θ, IV)=+0.288  vol-RMSE 0.1870 vs flat 0.1808 → does NOT beat flat σ
+
+Wrote reports/diagnostic/vol_overlay_summary.csv (8 new/updated rows, 8 total) and PNGs to reports/diagnostic/
+
+============================================
+W0 audits done: Fri Jul  3 02:34:22 PM EDT 2026
+Outputs: reports/diagnostic/{physics_fidelity.csv,vol_overlay_summary.csv,*.png}
+============================================

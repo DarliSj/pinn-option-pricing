@@ -1,0 +1,137 @@
+Node: dcc-core-ferc-s-z25-21  GPU: NVIDIA GeForce RTX 2080 Ti
+Date: Fri Jul  3 02:33:40 PM EDT 2026
+CUDA: True
+
+=== W1 smoke: balancer=relobralo ===
+Device: cuda
+Loading and preprocessing data...
+Full dataset: 59,668 obs, 2020-01-02 → 2020-12-31
+
+============================================================
+FOLD 1/1: Nov2020
+  Train: start → 2020-11-01  |  Test: 2020-11-01 → 2020-12-01
+============================================================
+  Train: 41,842  Val: 5,968  Test: 6,420
+  σ_fixed: 0.7763
+Training: mode=hybrid, epochs=1500, lr=0.001
+  Architecture: Modified MLP + RWF (μ=0.75)
+  Pricing net params: 37,698
+  Loss terms: ['pde', 'tc', 'bc', 'data']
+  Data loss WARMUP: epochs 1..200 run as physics-only
+  Balancer: relobralo (v1 default is 'gradnorm')
+======================================================================
+Ep     1/1500 | L=4.43e+06 | pde=4.43e+06 | w=1.00 | tc=9.11e+00 | w=1.00 | bc=1.06e+01 | w=1.00 | lr=1.0e-03
+  [warmup→hybrid] data loss activated at ep 201; λ_data init=1.00
+  [VAL] ep   500  val RMSE($): 118.2309  | spread: 845.256  | OTM/ATM/ITM: 139.860/33.388/94.199 ★
+  [VAL] ep  1000  val RMSE($): 36.3795  | spread: 201.476  | OTM/ATM/ITM: 41.003/13.103/36.985 ★
+  [VAL] ep  1500  val RMSE($): 21.5516  | spread: 113.780  | OTM/ATM/ITM: 23.565/10.187/23.522 ★
+
+Restored model to val-best epoch 1500 (val rmse_mkt=21.551574)
+
+Training complete in 43.0s
+REPORTED (val-best) test RMSE($): 29.7769  | spread: 102.843  | OTM/ATM/ITM: 33.500/15.640/28.282
+  → REPORTED test RMSE vs Market: $29.78 (val-best epoch: 1500)
+
+
+======================================================================================
+WALK-FORWARD RESULTS: arch=modified, mode=hybrid, μ=0.75
+  Single-phase val-best reporting (val held out, test eval'd once on snapshot)
+====================================================================================================
+Fold       |  σ_fix |     E* |  rep($) | spread |      OTM/ATM/ITM |   arb% |   time
+----------------------------------------------------------------------------------------------------
+Nov2020    |  0.776 |   1500 |   29.78 | 102.84 | 33.50/15.64/28.28 |  88.6% |     43
+----------------------------------------------------------------------------------------------------
+Pooled     |        |        |   29.78 | 102.84 | 33.50/15.64/28.28 |  88.6% |   ← headline
+Mean(fold) |        |   1500 |   29.78 |  E*: mean=1500  std=0  min=1500 max=1500
+
+Results saved to runs/v2/smoke/modified_hybrid_mu0.75_warmup200_relobralo/
+
+=== W1 smoke: balancer=gradnorm_renorm ===
+Device: cuda
+Loading and preprocessing data...
+Full dataset: 59,668 obs, 2020-01-02 → 2020-12-31
+
+============================================================
+FOLD 1/1: Nov2020
+  Train: start → 2020-11-01  |  Test: 2020-11-01 → 2020-12-01
+============================================================
+  Train: 41,842  Val: 5,968  Test: 6,420
+  σ_fixed: 0.7763
+Training: mode=hybrid, epochs=1500, lr=0.001
+  Architecture: Modified MLP + RWF (μ=0.75)
+  Pricing net params: 37,698
+  Loss terms: ['pde', 'tc', 'bc', 'data']
+  Data loss WARMUP: epochs 1..200 run as physics-only
+  Balancer: gradnorm_renorm (v1 default is 'gradnorm')
+======================================================================
+Ep     1/1500 | L=1.79e+02 | pde=4.43e+06 | w=0.00 | tc=9.11e+00 | w=1.14 | bc=1.06e+01 | w=2.86 | lr=1.0e-03
+  [warmup→hybrid] data loss activated at ep 201; λ_data init=1.00
+  [VAL] ep   500  val RMSE($): 23.4539  | spread: 188.663  | OTM/ATM/ITM: 20.075/28.725/27.516 ★
+  [VAL] ep  1000  val RMSE($): 8.7091  | spread: 44.077  | OTM/ATM/ITM: 8.524/8.186/9.856 ★
+  [VAL] ep  1500  val RMSE($): 8.4810  | spread: 44.269  | OTM/ATM/ITM: 8.505/7.689/9.221 ★
+
+Restored model to val-best epoch 1500 (val rmse_mkt=8.480959)
+
+Training complete in 45.4s
+REPORTED (val-best) test RMSE($): 9.3300  | spread: 50.583  | OTM/ATM/ITM: 8.806/9.932/10.015
+  → REPORTED test RMSE vs Market: $9.33 (val-best epoch: 1500)
+
+
+======================================================================================
+WALK-FORWARD RESULTS: arch=modified, mode=hybrid, μ=0.75
+  Single-phase val-best reporting (val held out, test eval'd once on snapshot)
+====================================================================================================
+Fold       |  σ_fix |     E* |  rep($) | spread |      OTM/ATM/ITM |   arb% |   time
+----------------------------------------------------------------------------------------------------
+Nov2020    |  0.776 |   1500 |    9.33 |  50.58 |  8.81/9.93/10.02 |  89.9% |     45
+----------------------------------------------------------------------------------------------------
+Pooled     |        |        |    9.33 |  50.58 |  8.81/9.93/10.02 |  89.9% |   ← headline
+Mean(fold) |        |   1500 |    9.33 |  E*: mean=1500  std=0  min=1500 max=1500
+
+Results saved to runs/v2/smoke/modified_hybrid_mu0.75_warmup200_gradnorm_renorm/
+
+=== W1 smoke: balancer=fixed ===
+Device: cuda
+Loading and preprocessing data...
+Full dataset: 59,668 obs, 2020-01-02 → 2020-12-31
+
+============================================================
+FOLD 1/1: Nov2020
+  Train: start → 2020-11-01  |  Test: 2020-11-01 → 2020-12-01
+============================================================
+  Train: 41,842  Val: 5,968  Test: 6,420
+  σ_fixed: 0.7763
+Training: mode=hybrid, epochs=1500, lr=0.001
+  Architecture: Modified MLP + RWF (μ=0.75)
+  Pricing net params: 37,698
+  Loss terms: ['pde', 'tc', 'bc', 'data']
+  Data loss WARMUP: epochs 1..200 run as physics-only
+  Balancer: fixed (v1 default is 'gradnorm')
+======================================================================
+Ep     1/1500 | L=4.43e+06 | pde=4.43e+06 | w=1.00 | tc=9.11e+00 | w=1.00 | bc=1.06e+01 | w=1.00 | lr=1.0e-03
+  [warmup→hybrid] data loss activated at ep 201; λ_data init=1.00
+  [VAL] ep   500  val RMSE($): 118.2309  | spread: 845.256  | OTM/ATM/ITM: 139.860/33.388/94.199 ★
+  [VAL] ep  1000  val RMSE($): 36.3953  | spread: 201.626  | OTM/ATM/ITM: 41.027/13.106/36.980 ★
+  [VAL] ep  1500  val RMSE($): 22.5252  | spread: 120.969  | OTM/ATM/ITM: 24.883/10.198/23.892 ★
+
+Restored model to val-best epoch 1500 (val rmse_mkt=22.525181)
+
+Training complete in 44.4s
+REPORTED (val-best) test RMSE($): 30.6870  | spread: 108.797  | OTM/ATM/ITM: 34.740/15.811/28.685
+  → REPORTED test RMSE vs Market: $30.69 (val-best epoch: 1500)
+
+
+======================================================================================
+WALK-FORWARD RESULTS: arch=modified, mode=hybrid, μ=0.75
+  Single-phase val-best reporting (val held out, test eval'd once on snapshot)
+====================================================================================================
+Fold       |  σ_fix |     E* |  rep($) | spread |      OTM/ATM/ITM |   arb% |   time
+----------------------------------------------------------------------------------------------------
+Nov2020    |  0.776 |   1500 |   30.69 | 108.80 | 34.74/15.81/28.68 |  88.8% |     44
+----------------------------------------------------------------------------------------------------
+Pooled     |        |        |   30.69 | 108.80 | 34.74/15.81/28.68 |  88.8% |   ← headline
+Mean(fold) |        |   1500 |   30.69 |  E*: mean=1500  std=0  min=1500 max=1500
+
+Results saved to runs/v2/smoke/modified_hybrid_mu0.75_warmup200_fixed/
+
+W1 smoke done: Fri Jul  3 02:36:56 PM EDT 2026
